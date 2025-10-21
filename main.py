@@ -559,12 +559,20 @@ elif seccion == "📈 Comparación":
         # Botón para limpiar selección
         if st.button("🗑️ Limpiar Selección"):
             st.session_state.metricas_comparacion = []
+            st.rerun()
         
         # Si hay métricas en session state, mostrarlas
         if st.session_state.metricas_comparacion:
             st.success(f"✅ {len(st.session_state.metricas_comparacion)} métricas seleccionadas")
             for m in st.session_state.metricas_comparacion:
                 st.write(f"• {api.nombres_descriptivos.get(m, m)}")
+        
+        # Función callback para manejar cambios en checkboxes
+        def toggle_metrica(metrica):
+            if metrica in st.session_state.metricas_comparacion:
+                st.session_state.metricas_comparacion.remove(metrica)
+            else:
+                st.session_state.metricas_comparacion.append(metrica)
         
         # Selección manual con checkboxes
         for categoria, graficos in categorias.items():
@@ -574,12 +582,13 @@ elif seccion == "📈 Comparación":
                     # Verificar si está en session state
                     is_checked = grafico in st.session_state.metricas_comparacion
                     
-                    if st.checkbox(nombre_desc, value=is_checked, key=f"check_{grafico}"):
-                        if grafico not in st.session_state.metricas_comparacion:
-                            st.session_state.metricas_comparacion.append(grafico)
-                    else:
-                        if grafico in st.session_state.metricas_comparacion:
-                            st.session_state.metricas_comparacion.remove(grafico)
+                    st.checkbox(
+                        nombre_desc, 
+                        value=is_checked, 
+                        key=f"check_{grafico}",
+                        on_change=toggle_metrica,
+                        args=(grafico,)
+                    )
     
     with col2:
         st.markdown("#### ⚙️ Opciones de Comparación")
