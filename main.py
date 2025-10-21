@@ -43,15 +43,6 @@ class BlockchainInfoAPI:
         self.cache = {}
         self.duracion_cache = duracion_cache
 
-        # Métricas que SOLO funcionan con timespan='all'
-        self.metricas_solo_all = {
-            'n-payments-per-block',
-            'n-payments',
-            'mvrv',
-            'nvt', 
-            'nvts'
-        }
-
         self.nombres_descriptivos = {
             # Mercado
             'market-price': 'Precio de Mercado (USD)',
@@ -62,7 +53,7 @@ class BlockchainInfoAPI:
             'blocks-size': 'Tamaño de Blockchain (MB)',
             'avg-block-size': 'Tamaño Promedio de Bloque (MB)',
             'n-transactions-per-block': 'Transacciones por Bloque',
-            'n-payments-per-block': 'Pagos por Bloque (historial completo)',
+            'n-payments-per-block': 'Pagos por Bloque',
             'n-transactions-total': 'Número Total de Transacciones',
             'median-confirmation-time': 'Tiempo Mediano de Confirmación',
             'avg-confirmation-time': 'Tiempo Promedio de Confirmación',
@@ -104,10 +95,13 @@ class BlockchainInfoAPI:
         if params is None:
             params = {}
 
-        if 'charts' in endpoint and not params.get('timespan'):
-            for key, value in self.parametros_predeterminados.items():
-                if key not in params:
-                    params[key] = value
+        # Para endpoints de gráficos, SIEMPRE aplicar todos los parámetros predeterminados
+        if 'charts' in endpoint:
+            # Crear nuevo diccionario con parámetros predeterminados
+            new_params = self.parametros_predeterminados.copy()
+            # Sobrescribir con los parámetros pasados
+            new_params.update(params)
+            params = new_params
 
         clave_cache = f"{endpoint}_{str(params)}"
         ahora = time.time()
@@ -149,21 +143,12 @@ class BlockchainInfoAPI:
 
     def obtener_grafico(self, nombre_grafico: str, **params) -> pd.DataFrame:
         try:
-            # Endpoint especial para mempool-state-by-fee-level (MANEJAR PRIMERO)
+            # Endpoint especial para mempool-state-by-fee-level
             if nombre_grafico == 'mempool-state-by-fee-level':
                 endpoint = 'charts/mempool-state-by-fee-level/interval'
                 params = {'cors': 'true'}
             else:
                 endpoint = f"charts/{nombre_grafico}"
-                
-                # Forzar timespan='all' para métricas que solo funcionan con 'all'
-                if nombre_grafico in self.metricas_solo_all:
-                    # Crear nuevo diccionario con TODOS los parámetros predeterminados
-                    new_params = self.parametros_predeterminados.copy()
-                    new_params.update(params)  # Sobrescribir con params pasados
-                    new_params['timespan'] = 'all'  # Forzar timespan='all'
-                    params = new_params
-                    logger.info(f"Forzando timespan='all' para {nombre_grafico} con params: {params}")
             
             datos = self._hacer_solicitud(endpoint, params)
             
