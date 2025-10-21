@@ -55,6 +55,11 @@ class BlockchainInfoAPI:
         self.duracion_cache = duracion_cache
         self.metadatos_graficos = {}
         self.graficos_disponibles = set()
+        
+        # Solo métricas con endpoints especiales
+        self.metricas_con_endpoint_especial = {
+            'mempool-state-by-fee-level': 'charts/mempool-state-by-fee-level/interval'
+        }
 
         # Diccionario COMPLETO con todas las métricas disponibles
         self.nombres_descriptivos = {
@@ -76,9 +81,9 @@ class BlockchainInfoAPI:
             'hash-rate': 'Tasa de Hash (TH/s)',
             'difficulty': 'Dificultad de Minería',
             'miners-revenue': 'Ingresos de Mineros (USD)',
-            'transaction-fees': 'Comisiones de Transacción (BTC)',
-            'transaction-fees-usd': 'Comisiones de Transacción (USD)',
-            'fees-usd-per-transaction': 'Comisiones por Transacción (USD)',
+            'transaction-fees': 'Comisiones Totales (BTC)',
+            'transaction-fees-usd': 'Comisiones Totales (USD)',
+            'fees-usd-per-transaction': 'Comisiones Promedio por TX (USD)',
             'cost-per-transaction': 'Costo por Transacción',
             'cost-per-transaction-percent': 'Costo por Transacción (%)',
             
@@ -91,20 +96,19 @@ class BlockchainInfoAPI:
             'mempool-count': 'Conteo de Transacciones Mempool',
             'mempool-growth': 'Crecimiento del Mempool',
             'mempool-size': 'Tamaño del Mempool (Bytes)',
-            'mempool-state-by-fee-level': 'Bytes del Mempool por Nivel de Comisión',
-            'utxo-count': 'Salidas de Transacciones No Gastadas',
+            'mempool-state-by-fee-level': 'Estado del Mempool por Nivel de Comisión',
+            'utxo-count': 'Salidas de Transacciones No Gastadas (UTXO)',
             'n-transactions-excluding-popular': 'Transacciones (Excluyendo Direcciones Populares)',
             'estimated-transaction-volume': 'Valor de Transacción Estimado (BTC)',
             'estimated-transaction-volume-usd': 'Valor de Transacción Estimado (USD)',
             
             # Market Signals
-            'mvrv': 'Ratio Valor de Mercado a Valor Realizado',
-            'nvt': 'Ratio Valor de Red a Transacciones',
+            'mvrv': 'Ratio Valor de Mercado a Valor Realizado (MVRV)',
+            'nvt': 'Ratio Valor de Red a Transacciones (NVT)',
             'nvts': 'Señal NVT',
             
             # Supply
             'total-bitcoins': 'Bitcoins en Circulación',
-            'market-price-usd': 'Precio de Mercado USD',
         }
 
     def _hacer_solicitud(self, endpoint: str, params: Dict[str, Any] = None, usar_cache: bool = True) -> Dict[str, Any]:
@@ -169,12 +173,43 @@ class BlockchainInfoAPI:
 
     def obtener_grafico(self, nombre_grafico: str, **params) -> pd.DataFrame:
         try:
-            endpoint = f"charts/{nombre_grafico}"
+            # Verificar si esta métrica necesita ajuste de daysAverageString
+            if nombre_grafico in self.metricas_con_ajuste_promedio:
+                timespan_solicitado = params.get('timespan', self.parametros_predeterminados.get('timespan'))
+                
+                # Para timespans largos, usar promedio de 30 días
+                timespans_largos = ['2years', '3years', '5years', 'all']
+                
+                if timespan_solicitado in timespans_largos:
+                    params['daysAverageString'] = '30d'
+                    logger.info(f"Usando daysAverageString='30d' para {nombre_grafico} con timespan {timespan_solicitado}")
+                else:
+                    params['daysAverageString'] = '1d'
+            
+            # Verificar si esta métrica tiene un endpoint especial
+            if nombre_grafico in self.metricas_con_endpoint_especial:
+                endpoint = self.metricas_con_endpoint_especial[nombre_grafico]
+                # Para mempool-state-by-fee-level, solo usar parámetro cors
+                if nombre_grafico == 'mempool-state-by-fee-level':
+                    params = {'cors': 'true'}
+            else:
+                endpoint = f"charts/{nombre_grafico}"
+            
             datos = self._hacer_solicitud(endpoint, params)
+            
+            # Validar que tenemos datos
+            if not datos or 'values' not in datos:
+                logger.warning(f"No hay datos disponibles para {nombre_grafico}")
+                return pd.DataFrame()
+            
+            if not datos['values'] or len(datos['values']) == 0:
+                logger.warning(f"La respuesta para {nombre_grafico} está vacía")
+                return pd.DataFrame()
+            
             return self._procesar_datos_grafico(datos)
         except Exception as e:
             logger.error(f"Error al obtener el gráfico {nombre_grafico}: {str(e)}")
-            raise
+            return pd.DataFrame()  # Retornar DataFrame vacío en lugar de lanzar excepción
 
     def obtener_pools(self, **params) -> pd.DataFrame:
         try:
@@ -424,6 +459,20 @@ def crear_grafico_plotly(df, titulo, y_label="Valor"):
 st.markdown('<h1 class="gradient-text">₿ Bitcoin Analytics Dashboard</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Análisis profesional de datos de blockchain en tiempo real</p>', unsafe_allow_html=True)
 
+# Definir timespan_options globalmente para usar en todo el código
+timespan_options = {
+    "1 día": "1days",
+    "1 semana": "1weeks",
+    "1 mes": "1months",
+    "3 meses": "3months",
+    "6 meses": "6months",
+    "1 año": "1year",
+    "2 años": "2years",
+    "3 años": "3years",
+    "5 años": "5years",
+    "Todo": "all"
+}
+
 # Sidebar
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Bitcoin.svg/1200px-Bitcoin.svg.png", width=100)
@@ -437,19 +486,6 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### ⚙️ Configuración")
-    
-    timespan_options = {
-        "1 día": "1days",
-        "1 semana": "1weeks",
-        "1 mes": "1months",
-        "3 meses": "3months",
-        "6 meses": "6months",
-        "1 año": "1year",
-        "2 años": "2years",
-        "3 años": "3years",
-        "5 años": "5years",
-        "Todo": "all"
-    }
     
     timespan_label = st.selectbox("📅 Período de tiempo", list(timespan_options.keys()), index=6)
     timespan = timespan_options[timespan_label]
@@ -466,6 +502,39 @@ with st.sidebar:
     <b>💡 Tip:</b> Explora diferentes métricas para obtener insights profundos sobre Bitcoin.
     </div>
     """, unsafe_allow_html=True)
+    
+    with st.expander("ℹ️ Acerca de las Comisiones"):
+        st.markdown("""
+        **Diferencia entre métricas de comisiones:**
+        
+        • **Comisiones Totales (BTC)**: Suma total de todas las comisiones pagadas en un período (en BTC)
+        
+        • **Comisiones Totales (USD)**: Suma total de todas las comisiones pagadas en un período (en USD)
+        
+        • **Comisiones Promedio por TX (USD)**: Comisión promedio por transacción individual (en USD)
+        """, unsafe_allow_html=False)
+    
+    with st.expander("⚙️ Métricas con Ajuste Automático"):
+        st.markdown("""
+        **Las siguientes métricas ajustan automáticamente su promedio de días:**
+        
+        **Detalles de Bloques:**
+        • Pagos por Bloque
+        
+        **Actividad de Red:**
+        • Pagos Confirmados por Día
+        • Estado del Mempool por Nivel de Comisión
+        
+        **Señales de Mercado:**
+        • MVRV - Ratio Valor de Mercado a Valor Realizado
+        • NVT - Ratio Valor de Red a Transacciones
+        • NVTS - Señal NVT
+        
+        Para períodos largos (2+ años, "Todo"), usan promedio de **30 días**.  
+        Para períodos cortos (≤1 año), usan promedio de **1 día**.
+        
+        ✨ El ajuste es automático, ¡no necesitas hacer nada!
+        """, unsafe_allow_html=False)
 
 # Sección: INICIO
 if seccion == "🏠 Inicio":
@@ -475,51 +544,79 @@ if seccion == "🏠 Inicio":
     
     with st.spinner("Cargando datos..."):
         try:
-            precio_df = api.obtener_precio_mercado(timespan='1days')
-            valor_col = 'y' if 'y' in precio_df.columns else precio_df.columns[0]
-            precio_actual = precio_df[valor_col].iloc[-1]
-            precio_anterior = precio_df[valor_col].iloc[-2] if len(precio_df) > 1 else precio_actual
-            delta_precio = ((precio_actual - precio_anterior) / precio_anterior) * 100
+            # Precio
+            precio_df = api.obtener_precio_mercado(timespan='30days')
+            if len(precio_df) > 0:
+                valor_col = 'y' if 'y' in precio_df.columns else precio_df.columns[0]
+                precio_actual = precio_df[valor_col].iloc[-1]
+                precio_anterior = precio_df[valor_col].iloc[-2] if len(precio_df) > 1 else precio_actual
+                delta_precio = ((precio_actual - precio_anterior) / precio_anterior) * 100
+                
+                with col1:
+                    st.metric(
+                        label="💰 Precio Bitcoin",
+                        value=f"${precio_actual:,.2f}",
+                        delta=f"{delta_precio:+.2f}%"
+                    )
+            else:
+                with col1:
+                    st.metric(label="💰 Precio Bitcoin", value="N/A")
             
-            with col1:
-                st.metric(
-                    label="💰 Precio Bitcoin",
-                    value=f"${precio_actual:,.2f}",
-                    delta=f"{delta_precio:+.2f}%"
-                )
+            # Cap de mercado
+            cap_df = api.obtener_cap_mercado(timespan='30days')
+            if len(cap_df) > 0:
+                valor_col = 'y' if 'y' in cap_df.columns else cap_df.columns[0]
+                cap_actual = cap_df[valor_col].iloc[-1]
+                
+                with col2:
+                    st.metric(
+                        label="📈 Cap. de Mercado",
+                        value=f"${cap_actual/1e9:.2f}B"
+                    )
+            else:
+                with col2:
+                    st.metric(label="📈 Cap. de Mercado", value="N/A")
             
-            cap_df = api.obtener_cap_mercado(timespan='1days')
-            valor_col = 'y' if 'y' in cap_df.columns else cap_df.columns[0]
-            cap_actual = cap_df[valor_col].iloc[-1]
+            # Volumen
+            volumen_df = api.obtener_volumen_comercio(timespan='30days')
+            if len(volumen_df) > 0:
+                valor_col = 'y' if 'y' in volumen_df.columns else volumen_df.columns[0]
+                volumen_actual = volumen_df[valor_col].iloc[-1]
+                
+                with col3:
+                    st.metric(
+                        label="💹 Volumen 24h",
+                        value=f"${volumen_actual/1e6:.2f}M"
+                    )
+            else:
+                with col3:
+                    st.metric(label="💹 Volumen 24h", value="N/A")
             
-            with col2:
-                st.metric(
-                    label="📈 Cap. de Mercado",
-                    value=f"${cap_actual/1e9:.2f}B"
-                )
-            
-            volumen_df = api.obtener_volumen_comercio(timespan='1days')
-            valor_col = 'y' if 'y' in volumen_df.columns else volumen_df.columns[0]
-            volumen_actual = volumen_df[valor_col].iloc[-1]
-            
-            with col3:
-                st.metric(
-                    label="💹 Volumen 24h",
-                    value=f"${volumen_actual/1e6:.2f}M"
-                )
-            
-            tx_df = api.obtener_transacciones(timespan='1days')
-            valor_col = 'y' if 'y' in tx_df.columns else tx_df.columns[0]
-            tx_actual = tx_df[valor_col].iloc[-1]
-            
-            with col4:
-                st.metric(
-                    label="🔄 Transacciones 24h",
-                    value=f"{tx_actual:,.0f}"
-                )
+            # Transacciones
+            tx_df = api.obtener_transacciones(timespan='30days')
+            if len(tx_df) > 0:
+                valor_col = 'y' if 'y' in tx_df.columns else tx_df.columns[0]
+                tx_actual = tx_df[valor_col].iloc[-1]
+                
+                with col4:
+                    st.metric(
+                        label="🔄 Transacciones 24h",
+                        value=f"{tx_actual:,.0f}"
+                    )
+            else:
+                with col4:
+                    st.metric(label="🔄 Transacciones 24h", value="N/A")
         
         except Exception as e:
             st.error(f"Error al cargar métricas: {str(e)}")
+            with col1:
+                st.metric(label="💰 Precio Bitcoin", value="Error")
+            with col2:
+                st.metric(label="📈 Cap. de Mercado", value="Error")
+            with col3:
+                st.metric(label="💹 Volumen 24h", value="Error")
+            with col4:
+                st.metric(label="🔄 Transacciones 24h", value="Error")
     
     st.markdown("---")
     
@@ -529,8 +626,11 @@ if seccion == "🏠 Inicio":
         st.markdown("### 📈 Evolución del Precio")
         try:
             precio_df = api.obtener_precio_mercado(timespan=timespan)
-            fig = crear_grafico_plotly(precio_df, "Precio de Bitcoin (USD)", "Precio (USD)")
-            st.plotly_chart(fig, use_container_width=True)
+            if not precio_df.empty and len(precio_df) > 0:
+                fig = crear_grafico_plotly(precio_df, "Precio de Bitcoin (USD)", "Precio (USD)")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("⚠️ No hay datos disponibles para el período seleccionado")
         except Exception as e:
             st.error(f"Error al cargar gráfico: {str(e)}")
     
@@ -586,6 +686,11 @@ elif seccion == "📊 Visualización":
         with st.spinner("Obteniendo datos..."):
             try:
                 df = api.obtener_grafico(metrica_seleccionada, timespan=timespan)
+                
+                if df.empty or len(df) == 0:
+                    st.error(f"❌ No hay datos disponibles para '{metrica_mostrar}' en el período seleccionado")
+                    st.info("💡 Intenta con un período de tiempo diferente o selecciona otra métrica")
+                    return
                 
                 fig = go.Figure()
                 
@@ -687,6 +792,11 @@ elif seccion == "📈 Comparación":
                 try:
                     df = api.obtener_grafico(metrica, timespan=timespan)
                     
+                    if df.empty or len(df) == 0:
+                        metricas_fallidas.append(f"{api.nombres_descriptivos.get(metrica, metrica)}")
+                        logger.warning(f"No hay datos para {metrica}")
+                        continue
+                    
                     if normalizar and len(df) > 0:
                         df = (df / df.iloc[0]) * 100
                     
@@ -775,11 +885,14 @@ elif seccion == "🔍 Explorador":
                             with st.spinner("Cargando..."):
                                 try:
                                     df = api.obtener_grafico(grafico, timespan=timespan)
-                                    fig = crear_grafico_plotly(
-                                        df,
-                                        api.nombres_descriptivos.get(grafico, grafico)
-                                    )
-                                    st.plotly_chart(fig, use_container_width=True)
+                                    if not df.empty and len(df) > 0:
+                                        fig = crear_grafico_plotly(
+                                            df,
+                                            api.nombres_descriptivos.get(grafico, grafico)
+                                        )
+                                        st.plotly_chart(fig, use_container_width=True)
+                                    else:
+                                        st.warning(f"⚠️ No hay datos disponibles para esta métrica")
                                 except Exception as e:
                                     st.error(f"Error: {str(e)}")
     
@@ -858,6 +971,11 @@ elif seccion == "📥 Exportar Datos":
                 try:
                     df = api.obtener_grafico(metrica, timespan=timespan)
                     
+                    if df.empty or len(df) == 0:
+                        st.error("❌ No hay datos disponibles para exportar en el período seleccionado")
+                        st.info("💡 Intenta con un período de tiempo diferente")
+                        return
+                    
                     if formato == "CSV":
                         csv = df.to_csv().encode('utf-8')
                         st.download_button(
@@ -902,25 +1020,31 @@ elif seccion == "📥 Exportar Datos":
                 with st.spinner("Generando archivo Excel..."):
                     try:
                         buffer = BytesIO()
+                        metricas_exportadas = 0
                         
                         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                             for metrica in metricas_export:
                                 try:
                                     df = api.obtener_grafico(metrica, timespan=timespan)
-                                    nombre_hoja = api.nombres_descriptivos.get(metrica, metrica)[:31]
-                                    df.to_excel(writer, sheet_name=nombre_hoja)
+                                    if not df.empty and len(df) > 0:
+                                        nombre_hoja = api.nombres_descriptivos.get(metrica, metrica)[:31]
+                                        df.to_excel(writer, sheet_name=nombre_hoja)
+                                        metricas_exportadas += 1
                                 except Exception as e:
                                     logger.error(f"Error exportando {metrica}: {str(e)}")
                                     continue
                         
-                        st.download_button(
-                            label="⬇️ Descargar Excel Completo",
-                            data=buffer.getvalue(),
-                            file_name=f"bitcoin_metrics_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                        
-                        st.success("✅ Archivo Excel generado correctamente")
+                        if metricas_exportadas > 0:
+                            st.download_button(
+                                label="⬇️ Descargar Excel Completo",
+                                data=buffer.getvalue(),
+                                file_name=f"bitcoin_metrics_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                            
+                            st.success(f"✅ {metricas_exportadas} de {len(metricas_export)} métricas exportadas correctamente")
+                        else:
+                            st.error("❌ No se pudo exportar ninguna métrica")
                         
                     except Exception as e:
                         st.error(f"Error al exportar: {str(e)}")
