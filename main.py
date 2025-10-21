@@ -546,8 +546,12 @@ elif seccion == "📈 Comparación":
         with cols[idx % 4]:
             if st.button(nombre, key=f"combo_{idx}", use_container_width=True):
                 st.session_state.metricas_comparacion = metricas
+                st.rerun()
     
     st.markdown("---")
+    
+    # Asignar metricas_seleccionadas ANTES de las columnas
+    metricas_seleccionadas = st.session_state.metricas_comparacion
     
     categorias = api.obtener_categorias_graficos()
     
@@ -559,6 +563,7 @@ elif seccion == "📈 Comparación":
         # Botón para limpiar selección
         if st.button("🗑️ Limpiar Selección"):
             st.session_state.metricas_comparacion = []
+            st.rerun()
         
         # Si hay métricas en session state, mostrarlas
         if st.session_state.metricas_comparacion:
@@ -580,8 +585,6 @@ elif seccion == "📈 Comparación":
                     else:
                         if grafico in st.session_state.metricas_comparacion:
                             st.session_state.metricas_comparacion.remove(grafico)
-        
-        metricas_seleccionadas = st.session_state.metricas_comparacion
     
     with col2:
         st.markdown("#### ⚙️ Opciones de Comparación")
