@@ -43,6 +43,15 @@ class BlockchainInfoAPI:
         self.cache = {}
         self.duracion_cache = duracion_cache
 
+        # Métricas que SOLO funcionan con timespan='all'
+        self.metricas_solo_all = {
+            'n-payments-per-block',
+            'n-payments',
+            'mvrv',
+            'nvt', 
+            'nvts'
+        }
+
         self.nombres_descriptivos = {
             # Mercado
             'market-price': 'Precio de Mercado (USD)',
@@ -53,7 +62,7 @@ class BlockchainInfoAPI:
             'blocks-size': 'Tamaño de Blockchain (MB)',
             'avg-block-size': 'Tamaño Promedio de Bloque (MB)',
             'n-transactions-per-block': 'Transacciones por Bloque',
-            'n-payments-per-block': 'Pagos por Bloque',
+            'n-payments-per-block': 'Pagos por Bloque (historial completo)',
             'n-transactions-total': 'Número Total de Transacciones',
             'median-confirmation-time': 'Tiempo Mediano de Confirmación',
             'avg-confirmation-time': 'Tiempo Promedio de Confirmación',
@@ -64,29 +73,28 @@ class BlockchainInfoAPI:
             'miners-revenue': 'Ingresos de Mineros (USD)',
             'transaction-fees': 'Comisiones Totales (BTC)',
             'transaction-fees-usd': 'Comisiones Totales (USD)',
-            'fees-usd-per-transaction': 'Comisiones Promedio por TX (USD)',
             'cost-per-transaction': 'Costo por Transacción',
             'cost-per-transaction-percent': 'Costo por Transacción (%)',
             
             # Actividad de Red
             'n-unique-addresses': 'Direcciones Únicas Usadas',
             'n-transactions': 'Transacciones Confirmadas por Día',
-            'n-payments': 'Pagos Confirmados por Día',
+            'n-payments': 'Pagos Confirmados por Día (historial completo)',
             'transactions-per-second': 'Transacciones por Segundo',
             'output-volume': 'Valor de Salida por Día',
             'mempool-count': 'Conteo de Transacciones Mempool',
             'mempool-growth': 'Crecimiento del Mempool',
             'mempool-size': 'Tamaño del Mempool (Bytes)',
-            'mempool-state-by-fee-level': 'Estado del Mempool por Nivel de Comisión',
+            'mempool-state-by-fee-level': 'Estado del Mempool por Nivel de Comisión (snapshot)',
             'utxo-count': 'Salidas No Gastadas (UTXO)',
             'n-transactions-excluding-popular': 'Transacciones (Excluyendo Populares)',
             'estimated-transaction-volume': 'Valor de Transacción Estimado (BTC)',
             'estimated-transaction-volume-usd': 'Valor de Transacción Estimado (USD)',
             
             # Señales de Mercado
-            'mvrv': 'Ratio Valor de Mercado a Valor Realizado (MVRV)',
-            'nvt': 'Ratio Valor de Red a Transacciones (NVT)',
-            'nvts': 'Señal NVT',
+            'mvrv': 'MVRV - Valor de Mercado a Valor Realizado (historial completo)',
+            'nvt': 'NVT - Valor de Red a Transacciones (historial completo)',
+            'nvts': 'Señal NVT (historial completo)',
             
             # Suministro
             'total-bitcoins': 'Bitcoins en Circulación',
@@ -141,12 +149,21 @@ class BlockchainInfoAPI:
 
     def obtener_grafico(self, nombre_grafico: str, **params) -> pd.DataFrame:
         try:
-            # Endpoint especial para mempool-state-by-fee-level
+            # Endpoint especial para mempool-state-by-fee-level (MANEJAR PRIMERO)
             if nombre_grafico == 'mempool-state-by-fee-level':
                 endpoint = 'charts/mempool-state-by-fee-level/interval'
                 params = {'cors': 'true'}
             else:
                 endpoint = f"charts/{nombre_grafico}"
+                
+                # Forzar timespan='all' para métricas que solo funcionan con 'all'
+                if nombre_grafico in self.metricas_solo_all:
+                    # Crear nuevo diccionario con TODOS los parámetros predeterminados
+                    new_params = self.parametros_predeterminados.copy()
+                    new_params.update(params)  # Sobrescribir con params pasados
+                    new_params['timespan'] = 'all'  # Forzar timespan='all'
+                    params = new_params
+                    logger.info(f"Forzando timespan='all' para {nombre_grafico} con params: {params}")
             
             datos = self._hacer_solicitud(endpoint, params)
             
@@ -194,8 +211,7 @@ class BlockchainInfoAPI:
             'Información de Minería': [
                 'hash-rate', 'difficulty', 'miners-revenue',
                 'transaction-fees', 'transaction-fees-usd',
-                'fees-usd-per-transaction', 'cost-per-transaction',
-                'cost-per-transaction-percent'
+                'cost-per-transaction', 'cost-per-transaction-percent'
             ],
             'Actividad de Red': [
                 'n-unique-addresses', 'n-transactions', 'n-payments',
@@ -384,6 +400,23 @@ with st.sidebar:
     <b>💡 Tip:</b> Explora diferentes métricas para obtener insights profundos sobre Bitcoin.
     </div>
     """, unsafe_allow_html=True)
+    
+    with st.expander("ℹ️ Métricas Especiales"):
+        st.markdown("""
+        **Métricas con historial completo:**
+        
+        Estas métricas ignoran el período seleccionado y muestran todo el historial:
+        • Pagos por Bloque
+        • Pagos Confirmados por Día
+        • MVRV, NVT, NVTS
+        
+        **Métricas especiales:**
+        • **Estado del Mempool por Nivel de Comisión**: Muestra un snapshot del estado actual
+        
+        **Nota sobre comisiones:**
+        • **Comisiones Totales (BTC)**: Suma de todas las comisiones en BTC
+        • **Comisiones Totales (USD)**: Suma de todas las comisiones en USD
+        """, unsafe_allow_html=False)
 
 # SECCIÓN: INICIO
 if seccion == "🏠 Inicio":
@@ -501,6 +534,10 @@ elif seccion == "📊 Visualización":
     if st.button("🚀 Cargar Datos", type="primary"):
         with st.spinner("Obteniendo datos..."):
             try:
+                # Advertencia para métricas con historial completo
+                if metrica_seleccionada in api.metricas_solo_all:
+                    st.info("ℹ️ Esta métrica muestra el historial completo, ignorando el período seleccionado")
+                
                 df = api.obtener_grafico(metrica_seleccionada, timespan=timespan)
                 
                 if df.empty:
