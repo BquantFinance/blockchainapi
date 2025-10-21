@@ -9,17 +9,10 @@ import logging
 from typing import Dict, List, Any
 from io import BytesIO
 
-# Configuración de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('BlockchainInfoAPI')
 
-# ============================================================================
-# CLASE BlockchainInfoAPI
-# ============================================================================
-
 class BlockchainInfoAPI:
-    """Wrapper completo para la API de blockchain.info"""
-
     BASE_URL = "https://api.blockchain.info"
 
     def __init__(self, duracion_cache: int = 3600):
@@ -44,12 +37,9 @@ class BlockchainInfoAPI:
         self.duracion_cache = duracion_cache
 
         self.nombres_descriptivos = {
-            # Mercado
             'market-price': 'Precio de Mercado (USD)',
             'market-cap': 'Capitalización de Mercado',
             'trade-volume': 'Volumen de Comercio USD',
-            
-            # Detalles de Bloques
             'blocks-size': 'Tamaño de Blockchain (MB)',
             'avg-block-size': 'Tamaño Promedio de Bloque (MB)',
             'n-transactions-per-block': 'Transacciones por Bloque',
@@ -57,8 +47,6 @@ class BlockchainInfoAPI:
             'n-transactions-total': 'Número Total de Transacciones',
             'median-confirmation-time': 'Tiempo Mediano de Confirmación',
             'avg-confirmation-time': 'Tiempo Promedio de Confirmación',
-            
-            # Información de Minería
             'hash-rate': 'Tasa de Hash (TH/s)',
             'difficulty': 'Dificultad de Minería',
             'miners-revenue': 'Ingresos de Mineros (USD)',
@@ -66,28 +54,22 @@ class BlockchainInfoAPI:
             'transaction-fees-usd': 'Comisiones Totales (USD)',
             'cost-per-transaction': 'Costo por Transacción',
             'cost-per-transaction-percent': 'Costo por Transacción (%)',
-            
-            # Actividad de Red
             'n-unique-addresses': 'Direcciones Únicas Usadas',
             'n-transactions': 'Transacciones Confirmadas por Día',
-            'n-payments': 'Pagos Confirmados por Día (historial completo)',
+            'n-payments': 'Pagos Confirmados por Día',
             'transactions-per-second': 'Transacciones por Segundo',
             'output-volume': 'Valor de Salida por Día',
             'mempool-count': 'Conteo de Transacciones Mempool',
             'mempool-growth': 'Crecimiento del Mempool',
             'mempool-size': 'Tamaño del Mempool (Bytes)',
-            'mempool-state-by-fee-level': 'Estado del Mempool por Nivel de Comisión (snapshot)',
+            'mempool-state-by-fee-level': 'Estado del Mempool por Nivel de Comisión',
             'utxo-count': 'Salidas No Gastadas (UTXO)',
             'n-transactions-excluding-popular': 'Transacciones (Excluyendo Populares)',
             'estimated-transaction-volume': 'Valor de Transacción Estimado (BTC)',
             'estimated-transaction-volume-usd': 'Valor de Transacción Estimado (USD)',
-            
-            # Señales de Mercado
-            'mvrv': 'MVRV - Valor de Mercado a Valor Realizado (historial completo)',
-            'nvt': 'NVT - Valor de Red a Transacciones (historial completo)',
-            'nvts': 'Señal NVT (historial completo)',
-            
-            # Suministro
+            'mvrv': 'MVRV - Valor de Mercado a Valor Realizado',
+            'nvt': 'NVT - Valor de Red a Transacciones',
+            'nvts': 'Señal NVT',
             'total-bitcoins': 'Bitcoins en Circulación',
         }
 
@@ -95,11 +77,8 @@ class BlockchainInfoAPI:
         if params is None:
             params = {}
 
-        # Para endpoints de gráficos, SIEMPRE aplicar todos los parámetros predeterminados
         if 'charts' in endpoint:
-            # Crear nuevo diccionario con parámetros predeterminados
             new_params = self.parametros_predeterminados.copy()
-            # Sobrescribir con los parámetros pasados
             new_params.update(params)
             params = new_params
 
@@ -143,7 +122,6 @@ class BlockchainInfoAPI:
 
     def obtener_grafico(self, nombre_grafico: str, **params) -> pd.DataFrame:
         try:
-            # Endpoint especial para mempool-state-by-fee-level
             if nombre_grafico == 'mempool-state-by-fee-level':
                 endpoint = 'charts/mempool-state-by-fee-level/interval'
                 params = {'cors': 'true'}
@@ -220,10 +198,6 @@ class BlockchainInfoAPI:
 
     def obtener_transacciones(self, **params) -> pd.DataFrame:
         return self.obtener_grafico('n-transactions', **params)
-
-# ============================================================================
-# CONFIGURACIÓN DE STREAMLIT
-# ============================================================================
 
 st.set_page_config(
     page_title="Bitcoin Analytics Dashboard",
@@ -338,10 +312,6 @@ def crear_grafico_plotly(df, titulo, y_label="Valor"):
     
     return fig
 
-# ============================================================================
-# INTERFAZ DE USUARIO
-# ============================================================================
-
 st.markdown('<h1 class="gradient-text">₿ Bitcoin Analytics Dashboard</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Análisis profesional de datos de blockchain en tiempo real</p>', unsafe_allow_html=True)
 
@@ -385,25 +355,7 @@ with st.sidebar:
     <b>💡 Tip:</b> Explora diferentes métricas para obtener insights profundos sobre Bitcoin.
     </div>
     """, unsafe_allow_html=True)
-    
-    with st.expander("ℹ️ Métricas Especiales"):
-        st.markdown("""
-        **Métricas con historial completo:**
-        
-        Estas métricas ignoran el período seleccionado y muestran todo el historial:
-        • Pagos por Bloque
-        • Pagos Confirmados por Día
-        • MVRV, NVT, NVTS
-        
-        **Métricas especiales:**
-        • **Estado del Mempool por Nivel de Comisión**: Muestra un snapshot del estado actual
-        
-        **Nota sobre comisiones:**
-        • **Comisiones Totales (BTC)**: Suma de todas las comisiones en BTC
-        • **Comisiones Totales (USD)**: Suma de todas las comisiones en USD
-        """, unsafe_allow_html=False)
 
-# SECCIÓN: INICIO
 if seccion == "🏠 Inicio":
     st.markdown("### 📊 Métricas Clave en Tiempo Real")
     
@@ -494,7 +446,6 @@ if seccion == "🏠 Inicio":
             with st.expander(f"📁 {cat}"):
                 st.write(f"**{len(graficos)} métricas**")
 
-# SECCIÓN: VISUALIZACIÓN
 elif seccion == "📊 Visualización":
     st.markdown("### 📊 Visualización de Métricas")
     
@@ -519,10 +470,6 @@ elif seccion == "📊 Visualización":
     if st.button("🚀 Cargar Datos", type="primary"):
         with st.spinner("Obteniendo datos..."):
             try:
-                # Advertencia para métricas con historial completo
-                if metrica_seleccionada in api.metricas_solo_all:
-                    st.info("ℹ️ Esta métrica muestra el historial completo, ignorando el período seleccionado")
-                
                 df = api.obtener_grafico(metrica_seleccionada, timespan=timespan)
                 
                 if df.empty:
@@ -572,7 +519,6 @@ elif seccion == "📊 Visualización":
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
-# SECCIÓN: COMPARACIÓN
 elif seccion == "📈 Comparación":
     st.markdown("### 📈 Comparación de Múltiples Métricas")
     
@@ -672,7 +618,6 @@ elif seccion == "📈 Comparación":
             else:
                 st.error("❌ No se pudo obtener ninguna métrica")
 
-# SECCIÓN: EXPLORADOR
 elif seccion == "🔍 Explorador":
     st.markdown("### 🔍 Explorador Avanzado de Datos")
     
@@ -749,7 +694,6 @@ elif seccion == "🔍 Explorador":
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
-# SECCIÓN: EXPORTAR
 elif seccion == "📥 Exportar Datos":
     st.markdown("### 📥 Exportar Datos")
     
@@ -848,7 +792,6 @@ elif seccion == "📥 Exportar Datos":
                     except Exception as e:
                         st.error(f"Error: {str(e)}")
 
-# Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #667eea; padding: 20px;">
