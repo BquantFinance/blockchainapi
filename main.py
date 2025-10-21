@@ -545,13 +545,9 @@ elif seccion == "📈 Comparación":
     for idx, (nombre, metricas) in enumerate(combinaciones_sugeridas.items()):
         with cols[idx % 4]:
             if st.button(nombre, key=f"combo_{idx}", use_container_width=True):
-                st.session_state.metricas_comparacion = metricas
-                st.rerun()
+                st.session_state.metricas_comparacion = metricas.copy()
     
     st.markdown("---")
-    
-    # Asignar metricas_seleccionadas ANTES de las columnas
-    metricas_seleccionadas = st.session_state.metricas_comparacion
     
     categorias = api.obtener_categorias_graficos()
     
@@ -563,7 +559,6 @@ elif seccion == "📈 Comparación":
         # Botón para limpiar selección
         if st.button("🗑️ Limpiar Selección"):
             st.session_state.metricas_comparacion = []
-            st.rerun()
         
         # Si hay métricas en session state, mostrarlas
         if st.session_state.metricas_comparacion:
@@ -594,12 +589,15 @@ elif seccion == "📈 Comparación":
         
         st.markdown("---")
         
-        if metricas_seleccionadas:
-            st.success(f"✅ {len(metricas_seleccionadas)} métricas listas para comparar")
+        if st.session_state.metricas_comparacion:
+            st.success(f"✅ {len(st.session_state.metricas_comparacion)} métricas listas para comparar")
         else:
             st.info("👆 Selecciona métricas manualmente o usa una combinación sugerida")
     
     st.markdown("---")
+    
+    # Siempre usar el session state para las métricas
+    metricas_seleccionadas = st.session_state.metricas_comparacion
     
     if st.button("🔄 Generar Comparación", type="primary", disabled=len(metricas_seleccionadas) == 0, use_container_width=True):
         with st.spinner("Generando comparación..."):
@@ -608,13 +606,16 @@ elif seccion == "📈 Comparación":
             metricas_fallidas = []
             
             progress_bar = st.progress(0)
+            status_text = st.empty()
             
             for idx, metrica in enumerate(metricas_seleccionadas):
                 try:
+                    status_text.text(f"Cargando {idx+1}/{len(metricas_seleccionadas)}: {api.nombres_descriptivos.get(metrica, metrica)}")
+                    
                     df = api.obtener_grafico(metrica, timespan=timespan)
                     
                     if df.empty:
-                        metricas_fallidas.append(api.nombres_descriptivos.get(metrica, metrica))
+                        metricas_fallidas.append((api.nombres_descriptivos.get(metrica, metrica), "Sin datos"))
                         continue
                     
                     if normalizar:
@@ -644,12 +645,14 @@ elif seccion == "📈 Comparación":
                     metricas_exitosas.append(nombre_desc)
                     
                 except Exception as e:
-                    metricas_fallidas.append(api.nombres_descriptivos.get(metrica, metrica))
-                    logger.error(f"Error en comparación con {metrica}: {str(e)}")
+                    error_msg = str(e)
+                    metricas_fallidas.append((api.nombres_descriptivos.get(metrica, metrica), error_msg))
+                    logger.error(f"Error en comparación con {metrica}: {error_msg}")
                 finally:
                     progress_bar.progress((idx + 1) / len(metricas_seleccionadas))
             
             progress_bar.empty()
+            status_text.empty()
             
             if metricas_exitosas:
                 fig.update_layout(
@@ -683,11 +686,16 @@ elif seccion == "📈 Comparación":
                     if metricas_fallidas:
                         st.warning(f"⚠️ {len(metricas_fallidas)} métricas fallaron")
                         with st.expander("❌ Ver métricas con error"):
-                            for m in metricas_fallidas:
+                            for m, error in metricas_fallidas:
                                 st.write(f"• {m}")
+                                st.caption(f"Error: {error[:100]}")
             else:
                 st.error("❌ No se pudo obtener ninguna de las métricas seleccionadas")
-                st.info("💡 Intenta con otras métricas o un período de tiempo diferente")
+                st.info("💡 Detalles de los errores:")
+                for m, error in metricas_fallidas:
+                    with st.expander(f"❌ {m}"):
+                        st.code(error)
+                st.info("🔧 Intenta con otras métricas o un período de tiempo diferente")
 
 elif seccion == "🔍 Explorador":
     st.markdown("### 🔍 Explorador Avanzado de Datos")
