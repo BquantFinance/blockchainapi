@@ -3,9 +3,233 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
-from blockchain_wrapper import BlockchainInfoAPI
+import requests
+import time
+import logging
+from typing import Dict, List, Optional, Any
+from io import BytesIO
 
-# Configuración de la página
+# Configuración de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('BlockchainInfoAPI')
+
+# ============================================================================
+# CLASE BlockchainInfoAPI
+# ============================================================================
+
+class BlockchainInfoAPI:
+    """
+    Un wrapper para la parte de Charts & Statistics de la API de blockchain.info
+    """
+
+    BASE_URL = "https://api.blockchain.info"
+
+    def __init__(self, duracion_cache: int = 3600):
+        """
+        Inicializa el wrapper de BlockchainInfoAPI.
+
+        Args:
+            duracion_cache: Cuánto tiempo almacenar en caché las respuestas de la API, en segundos (1 hora por defecto)
+        """
+        self.headers = {
+            'accept': '*/*',
+            'accept-language': 'es-ES,es;q=0.9,en;q=0.8',
+            'origin': 'https://www.blockchain.com',
+            'referer': 'https://www.blockchain.com/',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+        }
+
+        self.parametros_predeterminados = {
+            'timespan': '3years',
+            'timeseries': 'true',
+            'cors': 'true',
+            'format': 'json',
+        }
+
+        self.cache = {}
+        self.duracion_cache = duracion_cache
+        self.metadatos_graficos = {}
+        self.graficos_disponibles = set()
+
+        self.nombres_descriptivos = {
+            'market-price': 'Precio de Bitcoin (USD)',
+            'market-cap': 'Capitalización de Mercado',
+            'trade-volume': 'Volumen de Comercio',
+            'hash-rate': 'Tasa de Hash de la Red',
+            'difficulty': 'Dificultad de Minería',
+            'miners-revenue': 'Ingresos de Mineros',
+            'blocks-size': 'Tamaño de Bloques',
+            'avg-block-size': 'Tamaño Promedio de Bloque',
+            'n-transactions-per-block': 'Transacciones por Bloque',
+            'n-payments-per-block': 'Pagos por Bloque',
+            'n-transactions-total': 'Total de Transacciones',
+            'transaction-fees': 'Comisiones (BTC)',
+            'transaction-fees-usd': 'Comisiones (USD)',
+            'fees-usd-per-transaction': 'Comisiones USD por Transacción',
+            'cost-per-transaction': 'Costo por Transacción',
+            'cost-per-transaction-percent': 'Costo por Transacción (%)',
+            'avg-confirmation-time': 'Tiempo Promedio de Confirmación',
+            'nvt': 'Ratio Valor de Red a Transacciones (NVT)',
+            'nvts': 'Ratio Señal NVT (NVTS)',
+            'mvrv': 'Ratio Valor de Mercado a Valor Realizado (MVRV)',
+            'mempool-count': 'Transacciones en Mempool',
+            'mempool-growth': 'Crecimiento del Mempool',
+            'mempool-size': 'Tamaño del Mempool',
+            'mempool-state-by-fee-level': 'Estado del Mempool por Nivel de Comisión',
+            'n-unique-addresses': 'Direcciones Únicas',
+            'n-transactions': 'Transacciones Diarias',
+            'transactions-per-second': 'Transacciones por Segundo',
+            'n-payments': 'Número de Pagos',
+            'output-volume': 'Volumen de Salida',
+            'utxo-count': 'Contador UTXO',
+            'n-transactions-excluding-popular': 'Transacciones (excluyendo populares)',
+            'estimated-transaction-volume': 'Volumen de Transacciones Estimado',
+            'estimated-transaction-volume-usd': 'Volumen de Transacciones Estimado (USD)',
+            'total-bitcoins': 'Bitcoins en Circulación',
+        }
+
+    def _hacer_solicitud(self, endpoint: str, params: Dict[str, Any] = None, usar_cache: bool = True) -> Dict[str, Any]:
+        if params is None:
+            params = {}
+
+        if 'charts' in endpoint and not params.get('timespan'):
+            for key, value in self.parametros_predeterminados.items():
+                if key not in params:
+                    params[key] = value
+
+        clave_cache = f"{endpoint}_{str(params)}"
+        ahora = time.time()
+
+        if usar_cache and clave_cache in self.cache:
+            datos_cache, timestamp = self.cache[clave_cache]
+            if ahora - timestamp < self.duracion_cache:
+                logger.debug(f"Usando datos en caché para {endpoint}")
+                return datos_cache
+
+        url = f"{self.BASE_URL}/{endpoint}"
+        logger.info(f"Haciendo solicitud a {url} con parámetros {params}")
+
+        try:
+            respuesta = requests.get(url, params=params, headers=self.headers)
+            respuesta.raise_for_status()
+            datos = respuesta.json()
+
+            if usar_cache:
+                self.cache[clave_cache] = (datos, ahora)
+
+            return datos
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error al hacer solicitud a {url}: {str(e)}")
+            raise
+
+    def _procesar_datos_grafico(self, datos: Dict[str, Any]) -> pd.DataFrame:
+        if 'name' in datos and 'description' in datos:
+            nombre_grafico = datos['name']
+            self.metadatos_graficos[nombre_grafico] = {
+                'descripcion': datos['description'],
+                'unidad': datos.get('unit', ''),
+                'periodo': datos.get('period', '')
+            }
+            self.graficos_disponibles.add(nombre_grafico)
+
+        df = pd.DataFrame(datos['values'])
+
+        if 'x' in df.columns:
+            df = df.set_index('x')
+            df.index = pd.to_datetime(df.index, unit='s')
+
+        return df
+
+    def obtener_grafico(self, nombre_grafico: str, **params) -> pd.DataFrame:
+        try:
+            endpoint = f"charts/{nombre_grafico}"
+            datos = self._hacer_solicitud(endpoint, params)
+            return self._procesar_datos_grafico(datos)
+        except Exception as e:
+            logger.error(f"Error al obtener el gráfico {nombre_grafico}: {str(e)}")
+            raise
+
+    def obtener_pools(self, **params) -> pd.DataFrame:
+        try:
+            if 'timespan' not in params:
+                params['timespan'] = '3months'
+
+            endpoint = "pools"
+            datos = self._hacer_solicitud(endpoint, params)
+
+            df = pd.DataFrame(columns=['relativeSize'])
+
+            if isinstance(datos, dict):
+                for pool, info in datos.items():
+                    if isinstance(info, dict) and 'relativeSize' in info:
+                        df.at[pool, 'relativeSize'] = info['relativeSize']
+                    elif isinstance(info, (int, float)):
+                        df.at[pool, 'relativeSize'] = info
+
+            if df.empty:
+                logger.warning("No se encontraron datos válidos de pools de minería")
+                return df
+
+            return df.sort_values('relativeSize', ascending=False)
+
+        except Exception as e:
+            logger.error(f"Error al obtener datos de pools: {str(e)}")
+            return pd.DataFrame(columns=['relativeSize'])
+
+    def obtener_categorias_graficos(self) -> Dict[str, List[str]]:
+        categorias = {
+            'Mercado': [
+                'market-price', 'market-cap', 'trade-volume'
+            ],
+            'Red': [
+                'hash-rate', 'difficulty', 'miners-revenue'
+            ],
+            'Bloques': [
+                'blocks-size', 'avg-block-size', 'n-transactions-per-block', 'n-payments-per-block'
+            ],
+            'Transacciones': [
+                'n-transactions-total', 'transaction-fees', 'transaction-fees-usd',
+                'fees-usd-per-transaction', 'cost-per-transaction', 'cost-per-transaction-percent',
+                'avg-confirmation-time'
+            ],
+            'Valoración': [
+                'nvt', 'nvts', 'mvrv'
+            ],
+            'Mempool': [
+                'mempool-count', 'mempool-growth', 'mempool-size', 'mempool-state-by-fee-level'
+            ],
+            'Actividad de Red': [
+                'n-unique-addresses', 'n-transactions', 'transactions-per-second',
+                'n-payments', 'output-volume', 'utxo-count',
+                'n-transactions-excluding-popular', 'estimated-transaction-volume',
+                'estimated-transaction-volume-usd'
+            ],
+            'Suministro': [
+                'total-bitcoins'
+            ]
+        }
+        return categorias
+
+    def obtener_precio_mercado(self, **params) -> pd.DataFrame:
+        return self.obtener_grafico('market-price', **params)
+
+    def obtener_cap_mercado(self, **params) -> pd.DataFrame:
+        return self.obtener_grafico('market-cap', **params)
+
+    def obtener_volumen_comercio(self, **params) -> pd.DataFrame:
+        return self.obtener_grafico('trade-volume', **params)
+
+    def obtener_transacciones(self, **params) -> pd.DataFrame:
+        return self.obtener_grafico('n-transactions', **params)
+
+# ============================================================================
+# CONFIGURACIÓN DE STREAMLIT
+# ============================================================================
+
 st.set_page_config(
     page_title="Bitcoin Analytics Dashboard",
     page_icon="₿",
@@ -16,12 +240,10 @@ st.set_page_config(
 # CSS personalizado para modo oscuro elegante
 st.markdown("""
     <style>
-    /* Modo oscuro global */
     .stApp {
         background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
     }
     
-    /* Tarjetas con efecto glassmorphism */
     .metric-card {
         background: rgba(255, 255, 255, 0.05);
         backdrop-filter: blur(10px);
@@ -32,7 +254,6 @@ st.markdown("""
         margin: 10px 0;
     }
     
-    /* Títulos con degradado */
     .gradient-text {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         -webkit-background-clip: text;
@@ -43,7 +264,6 @@ st.markdown("""
         margin-bottom: 30px;
     }
     
-    /* Subtítulos */
     .subtitle {
         color: #a8b2d1;
         text-align: center;
@@ -51,13 +271,6 @@ st.markdown("""
         margin-bottom: 40px;
     }
     
-    /* Mejora de selectbox */
-    .stSelectbox {
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 10px;
-    }
-    
-    /* Botones personalizados */
     .stButton > button {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -73,18 +286,15 @@ st.markdown("""
         box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
     }
     
-    /* Sidebar mejorado */
     [data-testid="stSidebar"] {
         background: rgba(15, 12, 41, 0.8);
         backdrop-filter: blur(10px);
     }
     
-    /* Textos en sidebar */
     [data-testid="stSidebar"] .stMarkdown {
         color: #e6e6e6;
     }
     
-    /* Info boxes */
     .info-box {
         background: rgba(102, 126, 234, 0.1);
         border-left: 4px solid #667eea;
@@ -94,7 +304,6 @@ st.markdown("""
         color: #a8b2d1;
     }
     
-    /* Tabs personalizados */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         background: rgba(255, 255, 255, 0.05);
@@ -121,47 +330,6 @@ def init_api():
     return BlockchainInfoAPI()
 
 api = init_api()
-
-# Header principal
-st.markdown('<h1 class="gradient-text">₿ Bitcoin Analytics Dashboard</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Análisis profesional de datos de blockchain en tiempo real</p>', unsafe_allow_html=True)
-
-# Sidebar
-with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Bitcoin.svg/1200px-Bitcoin.svg.png", width=100)
-    st.markdown("## 🎯 Navegación")
-    
-    seccion = st.radio(
-        "Selecciona una sección:",
-        ["🏠 Inicio", "📊 Visualización", "📈 Comparación", "🔍 Explorador", "📥 Exportar Datos"],
-        label_visibility="collapsed"
-    )
-    
-    st.markdown("---")
-    st.markdown("### ⚙️ Configuración")
-    
-    # Período de tiempo global
-    timespan_options = {
-        "1 día": "1days",
-        "1 semana": "1weeks",
-        "1 mes": "1months",
-        "3 meses": "3months",
-        "6 meses": "6months",
-        "1 año": "1year",
-        "2 años": "2years",
-        "3 años": "3years",
-        "Todo": "all"
-    }
-    
-    timespan_label = st.selectbox("📅 Período de tiempo", list(timespan_options.keys()), index=4)
-    timespan = timespan_options[timespan_label]
-    
-    st.markdown("---")
-    st.markdown("""
-    <div class="info-box">
-    <b>💡 Tip:</b> Explora diferentes métricas para obtener insights profundos sobre Bitcoin.
-    </div>
-    """, unsafe_allow_html=True)
 
 # Función para crear gráficos con Plotly
 def crear_grafico_plotly(df, titulo, y_label="Valor"):
@@ -203,16 +371,58 @@ def crear_grafico_plotly(df, titulo, y_label="Valor"):
     
     return fig
 
+# ============================================================================
+# INTERFAZ DE USUARIO
+# ============================================================================
+
+# Header principal
+st.markdown('<h1 class="gradient-text">₿ Bitcoin Analytics Dashboard</h1>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Análisis profesional de datos de blockchain en tiempo real</p>', unsafe_allow_html=True)
+
+# Sidebar
+with st.sidebar:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Bitcoin.svg/1200px-Bitcoin.svg.png", width=100)
+    st.markdown("## 🎯 Navegación")
+    
+    seccion = st.radio(
+        "Selecciona una sección:",
+        ["🏠 Inicio", "📊 Visualización", "📈 Comparación", "🔍 Explorador", "📥 Exportar Datos"],
+        label_visibility="collapsed"
+    )
+    
+    st.markdown("---")
+    st.markdown("### ⚙️ Configuración")
+    
+    timespan_options = {
+        "1 día": "1days",
+        "1 semana": "1weeks",
+        "1 mes": "1months",
+        "3 meses": "3months",
+        "6 meses": "6months",
+        "1 año": "1year",
+        "2 años": "2years",
+        "3 años": "3years",
+        "Todo": "all"
+    }
+    
+    timespan_label = st.selectbox("📅 Período de tiempo", list(timespan_options.keys()), index=4)
+    timespan = timespan_options[timespan_label]
+    
+    st.markdown("---")
+    st.markdown("""
+    <div class="info-box">
+    <b>💡 Tip:</b> Explora diferentes métricas para obtener insights profundos sobre Bitcoin.
+    </div>
+    """, unsafe_allow_html=True)
+
 # Sección: INICIO
 if seccion == "🏠 Inicio":
-    # Métricas clave en tiempo real
     st.markdown("### 📊 Métricas Clave en Tiempo Real")
     
     col1, col2, col3, col4 = st.columns(4)
     
     with st.spinner("Cargando datos..."):
         try:
-            # Precio de mercado
             precio_df = api.obtener_precio_mercado(timespan='1days')
             precio_actual = precio_df['y'].iloc[-1]
             precio_anterior = precio_df['y'].iloc[-2] if len(precio_df) > 1 else precio_actual
@@ -225,7 +435,6 @@ if seccion == "🏠 Inicio":
                     delta=f"{delta_precio:+.2f}%"
                 )
             
-            # Capitalización de mercado
             cap_df = api.obtener_cap_mercado(timespan='1days')
             cap_actual = cap_df['y'].iloc[-1]
             
@@ -235,7 +444,6 @@ if seccion == "🏠 Inicio":
                     value=f"${cap_actual/1e9:.2f}B"
                 )
             
-            # Volumen de comercio
             volumen_df = api.obtener_volumen_comercio(timespan='1days')
             volumen_actual = volumen_df['y'].iloc[-1]
             
@@ -245,7 +453,6 @@ if seccion == "🏠 Inicio":
                     value=f"${volumen_actual/1e6:.2f}M"
                 )
             
-            # Transacciones
             tx_df = api.obtener_transacciones(timespan='1days')
             tx_actual = tx_df['y'].iloc[-1]
             
@@ -260,7 +467,6 @@ if seccion == "🏠 Inicio":
     
     st.markdown("---")
     
-    # Gráfico destacado
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -299,7 +505,6 @@ if seccion == "🏠 Inicio":
 elif seccion == "📊 Visualización":
     st.markdown("### 📊 Visualización de Métricas")
     
-    # Seleccionar categoría y métrica
     col1, col2 = st.columns([1, 2])
     
     with col1:
@@ -307,12 +512,9 @@ elif seccion == "📊 Visualización":
         categoria_seleccionada = st.selectbox("🏷️ Categoría", list(categorias.keys()))
         
         graficos_categoria = categorias[categoria_seleccionada]
-        
-        # Mostrar nombres descriptivos
         nombres_mostrar = [api.nombres_descriptivos.get(g, g) for g in graficos_categoria]
         metrica_mostrar = st.selectbox("📈 Métrica", nombres_mostrar)
         
-        # Obtener el nombre técnico de la métrica
         indice = nombres_mostrar.index(metrica_mostrar)
         metrica_seleccionada = graficos_categoria[indice]
         
@@ -321,13 +523,11 @@ elif seccion == "📊 Visualización":
     with col2:
         st.markdown(f"<div class='metric-card'><h4>{metrica_mostrar}</h4></div>", unsafe_allow_html=True)
     
-    # Botón para cargar datos
     if st.button("🚀 Cargar Datos", type="primary"):
         with st.spinner("Obteniendo datos..."):
             try:
                 df = api.obtener_grafico(metrica_seleccionada, timespan=timespan)
                 
-                # Crear gráfico según el tipo seleccionado
                 fig = go.Figure()
                 
                 if tipo_grafico == "Línea":
@@ -339,7 +539,7 @@ elif seccion == "📊 Visualización":
                             name=col,
                             line=dict(width=2)
                         ))
-                else:  # Área
+                else:
                     for col in df.columns:
                         fig.add_trace(go.Scatter(
                             x=df.index,
@@ -362,7 +562,6 @@ elif seccion == "📊 Visualización":
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Mostrar estadísticas
                 st.markdown("### 📊 Estadísticas")
                 col1, col2, col3, col4 = st.columns(4)
                 
@@ -375,7 +574,6 @@ elif seccion == "📊 Visualización":
                 with col4:
                     st.metric("Último Valor", f"{df['y'].iloc[-1]:,.2f}")
                 
-                # Mostrar datos en tabla
                 with st.expander("📋 Ver datos en tabla"):
                     st.dataframe(df.tail(50), use_container_width=True)
                 
@@ -388,7 +586,6 @@ elif seccion == "📈 Comparación":
     
     categorias = api.obtener_categorias_graficos()
     
-    # Selección múltiple de métricas
     col1, col2 = st.columns([1, 1])
     
     with col1:
@@ -413,7 +610,6 @@ elif seccion == "📈 Comparación":
         else:
             st.info("👆 Selecciona al menos una métrica de las categorías")
     
-    # Botón para comparar
     if st.button("🔄 Comparar Métricas", type="primary", disabled=len(metricas_seleccionadas) == 0):
         with st.spinner("Generando comparación..."):
             try:
@@ -422,7 +618,6 @@ elif seccion == "📈 Comparación":
                 for metrica in metricas_seleccionadas:
                     df = api.obtener_grafico(metrica, timespan=timespan)
                     
-                    # Normalizar si se solicita
                     if normalizar and len(df) > 0:
                         df = (df / df.iloc[0]) * 100
                     
@@ -511,7 +706,6 @@ elif seccion == "🔍 Explorador":
                     df_pools = api.obtener_pools(timespan=periodos_pools[periodo])
                     
                     if not df_pools.empty:
-                        # Gráfico de pastel
                         fig = go.Figure(data=[go.Pie(
                             labels=df_pools.index,
                             values=df_pools['relativeSize'],
@@ -535,7 +729,6 @@ elif seccion == "🔍 Explorador":
                         
                         st.plotly_chart(fig, use_container_width=True)
                         
-                        # Tabla de pools
                         st.markdown("#### 📊 Tabla de Distribución")
                         df_pools['Porcentaje'] = df_pools['relativeSize'].apply(lambda x: f"{x:.2f}%")
                         st.dataframe(df_pools[['Porcentaje']], use_container_width=True)
@@ -578,8 +771,6 @@ elif seccion == "📥 Exportar Datos":
                             mime="text/csv"
                         )
                     else:
-                        # Para Excel necesitamos usar un buffer
-                        from io import BytesIO
                         buffer = BytesIO()
                         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                             df.to_excel(writer, sheet_name=metrica[:31])
@@ -614,7 +805,6 @@ elif seccion == "📥 Exportar Datos":
             if st.button("📥 Exportar Múltiples", type="primary"):
                 with st.spinner("Generando archivo Excel..."):
                     try:
-                        from io import BytesIO
                         buffer = BytesIO()
                         
                         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -640,6 +830,10 @@ st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #667eea; padding: 20px;">
     <p><b>Bitcoin Analytics Dashboard</b> | Datos en tiempo real desde blockchain.info</p>
-    <p style="font-size: 0.8em; color: #a8b2d1;">Desarrollado con ❤️ usando Streamlit y Python</p>
+    <p style="font-size: 0.9em; color: #a8b2d1; margin-top: 10px;">
+        Desarrollado por <a href="https://x.com/Gsnchez" target="_blank" style="color: #667eea; text-decoration: none; font-weight: bold;">@Gsnchez</a> | 
+        <a href="https://bquantfinance.com" target="_blank" style="color: #764ba2; text-decoration: none; font-weight: bold;">bquantfinance.com</a>
+    </p>
+    <p style="font-size: 0.8em; color: #a8b2d1;">Creado con ❤️ usando Streamlit y Python</p>
 </div>
 """, unsafe_allow_html=True)
