@@ -522,29 +522,66 @@ elif seccion == "📊 Visualización":
 elif seccion == "📈 Comparación":
     st.markdown("### 📈 Comparación de Múltiples Métricas")
     
+    # Sugerencias de combinaciones
+    combinaciones_sugeridas = {
+        "💰 Precio y Mercado": ['market-price', 'market-cap', 'trade-volume'],
+        "⛏️ Minería": ['hash-rate', 'difficulty', 'miners-revenue'],
+        "📊 Actividad de Red": ['n-transactions', 'n-unique-addresses', 'transactions-per-second'],
+        "💸 Comisiones": ['transaction-fees', 'transaction-fees-usd', 'cost-per-transaction'],
+        "🧠 Mempool": ['mempool-count', 'mempool-size', 'mempool-growth'],
+        "📈 Señales de Mercado": ['mvrv', 'nvt', 'nvts'],
+        "🔗 Blockchain": ['blocks-size', 'avg-block-size', 'n-transactions-per-block'],
+        "⚡ Rendimiento": ['avg-confirmation-time', 'median-confirmation-time', 'transactions-per-second']
+    }
+    
+    st.markdown("#### 🎯 Combinaciones Sugeridas")
+    
+    cols = st.columns(4)
+    for idx, (nombre, metricas) in enumerate(combinaciones_sugeridas.items()):
+        with cols[idx % 4]:
+            if st.button(nombre, key=f"combo_{idx}", use_container_width=True):
+                st.session_state['metricas_seleccionadas'] = metricas
+                st.rerun()
+    
+    st.markdown("---")
+    
     categorias = api.obtener_categorias_graficos()
     
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.markdown("#### Selecciona métricas")
+        st.markdown("#### 📋 Selección Manual")
+        
+        if 'metricas_seleccionadas' not in st.session_state:
+            st.session_state['metricas_seleccionadas'] = []
+        
         metricas_seleccionadas = []
         
         for categoria, graficos in categorias.items():
             with st.expander(f"📁 {categoria} ({len(graficos)})"):
                 for grafico in graficos:
                     nombre_desc = api.nombres_descriptivos.get(grafico, grafico)
-                    if st.checkbox(nombre_desc, key=grafico):
+                    default_checked = grafico in st.session_state.get('metricas_seleccionadas', [])
+                    if st.checkbox(nombre_desc, key=grafico, value=default_checked):
                         metricas_seleccionadas.append(grafico)
     
     with col2:
-        st.markdown("#### Opciones")
+        st.markdown("#### ⚙️ Opciones de Comparación")
+        
+        tipo_grafico = st.selectbox("📊 Tipo de gráfico", ["Línea", "Área"], key="tipo_comparacion")
         normalizar = st.checkbox("📊 Normalizar datos (100 = valor inicial)", value=False)
         
         if metricas_seleccionadas:
             st.success(f"✅ {len(metricas_seleccionadas)} métricas seleccionadas")
+            with st.expander("Ver métricas seleccionadas"):
+                for m in metricas_seleccionadas:
+                    st.write(f"• {api.nombres_descriptivos.get(m, m)}")
         else:
-            st.info("👆 Selecciona al menos una métrica")
+            st.info("👆 Selecciona métricas manualmente o usa una combinación sugerida")
+        
+        if st.button("🗑️ Limpiar Selección", use_container_width=True):
+            st.session_state['metricas_seleccionadas'] = []
+            st.rerun()
     
     if st.button("🔄 Comparar Métricas", type="primary", disabled=len(metricas_seleccionadas) == 0):
         with st.spinner("Generando comparación..."):
@@ -568,13 +605,24 @@ elif seccion == "📈 Comparación":
                     nombre_desc = api.nombres_descriptivos.get(metrica, metrica)
                     valor_col = 'y' if 'y' in df.columns else df.columns[0]
                     
-                    fig.add_trace(go.Scatter(
-                        x=df.index,
-                        y=df[valor_col],
-                        mode='lines',
-                        name=nombre_desc,
-                        line=dict(width=2)
-                    ))
+                    if tipo_grafico == "Línea":
+                        fig.add_trace(go.Scatter(
+                            x=df.index,
+                            y=df[valor_col],
+                            mode='lines',
+                            name=nombre_desc,
+                            line=dict(width=2)
+                        ))
+                    else:  # Área
+                        fig.add_trace(go.Scatter(
+                            x=df.index,
+                            y=df[valor_col],
+                            fill='tonexty',
+                            name=nombre_desc,
+                            mode='lines',
+                            line=dict(width=1),
+                            stackgroup='one' if not normalizar else None
+                        ))
                     
                     metricas_exitosas.append(nombre_desc)
                     
