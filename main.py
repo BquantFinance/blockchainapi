@@ -22,7 +22,7 @@ logger = logging.getLogger('BlockchainInfoAPI')
 
 class BlockchainInfoAPI:
     """
-    Un wrapper para la parte de Charts & Statistics de la API de blockchain.info
+    Un wrapper completo para la API de Charts & Statistics de blockchain.info
     """
 
     BASE_URL = "https://api.blockchain.info"
@@ -43,8 +43,10 @@ class BlockchainInfoAPI:
         }
 
         self.parametros_predeterminados = {
-            'timespan': '3years',
-            'timeseries': 'true',
+            'timespan': '1year',
+            'sampled': 'true',
+            'metadata': 'false',
+            'daysAverageString': '1d',
             'cors': 'true',
             'format': 'json',
         }
@@ -54,47 +56,62 @@ class BlockchainInfoAPI:
         self.metadatos_graficos = {}
         self.graficos_disponibles = set()
 
+        # Diccionario COMPLETO con todas las métricas disponibles
         self.nombres_descriptivos = {
-            'market-price': 'Precio de Bitcoin (USD)',
+            # Market
+            'market-price': 'Precio de Mercado (USD)',
             'market-cap': 'Capitalización de Mercado',
-            'trade-volume': 'Volumen de Comercio',
-            'hash-rate': 'Tasa de Hash de la Red',
-            'difficulty': 'Dificultad de Minería',
-            'miners-revenue': 'Ingresos de Mineros',
-            'blocks-size': 'Tamaño de Bloques',
-            'avg-block-size': 'Tamaño Promedio de Bloque',
+            'trade-volume': 'Volumen de Comercio USD',
+            
+            # Block Details
+            'blocks-size': 'Tamaño de Blockchain (MB)',
+            'avg-block-size': 'Tamaño Promedio de Bloque (MB)',
             'n-transactions-per-block': 'Transacciones por Bloque',
             'n-payments-per-block': 'Pagos por Bloque',
-            'n-transactions-total': 'Total de Transacciones',
-            'transaction-fees': 'Comisiones (BTC)',
-            'transaction-fees-usd': 'Comisiones (USD)',
-            'fees-usd-per-transaction': 'Comisiones USD por Transacción',
+            'n-transactions-total': 'Número Total de Transacciones',
+            'median-confirmation-time': 'Tiempo Mediano de Confirmación',
+            'avg-confirmation-time': 'Tiempo Promedio de Confirmación',
+            
+            # Mining Information
+            'hash-rate': 'Tasa de Hash (TH/s)',
+            'difficulty': 'Dificultad de Minería',
+            'miners-revenue': 'Ingresos de Mineros (USD)',
+            'transaction-fees': 'Comisiones de Transacción (BTC)',
+            'transaction-fees-usd': 'Comisiones de Transacción (USD)',
+            'fees-usd-per-transaction': 'Comisiones por Transacción (USD)',
             'cost-per-transaction': 'Costo por Transacción',
             'cost-per-transaction-percent': 'Costo por Transacción (%)',
-            'avg-confirmation-time': 'Tiempo Promedio de Confirmación',
-            'nvt': 'Ratio Valor de Red a Transacciones (NVT)',
-            'nvts': 'Ratio Señal NVT (NVTS)',
-            'mvrv': 'Ratio Valor de Mercado a Valor Realizado (MVRV)',
-            'mempool-count': 'Transacciones en Mempool',
-            'mempool-growth': 'Crecimiento del Mempool',
-            'mempool-size': 'Tamaño del Mempool',
-            'mempool-state-by-fee-level': 'Estado del Mempool por Nivel de Comisión',
-            'n-unique-addresses': 'Direcciones Únicas',
-            'n-transactions': 'Transacciones Diarias',
+            
+            # Network Activity
+            'n-unique-addresses': 'Direcciones Únicas Usadas',
+            'n-transactions': 'Transacciones Confirmadas por Día',
+            'n-payments': 'Pagos Confirmados por Día',
             'transactions-per-second': 'Transacciones por Segundo',
-            'n-payments': 'Número de Pagos',
-            'output-volume': 'Volumen de Salida',
-            'utxo-count': 'Contador UTXO',
-            'n-transactions-excluding-popular': 'Transacciones (excluyendo populares)',
-            'estimated-transaction-volume': 'Volumen de Transacciones Estimado',
-            'estimated-transaction-volume-usd': 'Volumen de Transacciones Estimado (USD)',
+            'output-volume': 'Valor de Salida por Día',
+            'mempool-count': 'Conteo de Transacciones Mempool',
+            'mempool-growth': 'Crecimiento del Mempool',
+            'mempool-size': 'Tamaño del Mempool (Bytes)',
+            'mempool-state-by-fee-level': 'Bytes del Mempool por Nivel de Comisión',
+            'utxo-count': 'Salidas de Transacciones No Gastadas',
+            'n-transactions-excluding-popular': 'Transacciones (Excluyendo Direcciones Populares)',
+            'estimated-transaction-volume': 'Valor de Transacción Estimado (BTC)',
+            'estimated-transaction-volume-usd': 'Valor de Transacción Estimado (USD)',
+            
+            # Market Signals
+            'mvrv': 'Ratio Valor de Mercado a Valor Realizado',
+            'nvt': 'Ratio Valor de Red a Transacciones',
+            'nvts': 'Señal NVT',
+            
+            # Supply
             'total-bitcoins': 'Bitcoins en Circulación',
+            'market-price-usd': 'Precio de Mercado USD',
         }
 
     def _hacer_solicitud(self, endpoint: str, params: Dict[str, Any] = None, usar_cache: bool = True) -> Dict[str, Any]:
         if params is None:
             params = {}
 
+        # Aplicar parámetros predeterminados para endpoints de gráficos
         if 'charts' in endpoint and not params.get('timespan'):
             for key, value in self.parametros_predeterminados.items():
                 if key not in params:
@@ -110,7 +127,7 @@ class BlockchainInfoAPI:
                 return datos_cache
 
         url = f"{self.BASE_URL}/{endpoint}"
-        logger.info(f"Haciendo solicitud a {url} con parámetros {params}")
+        logger.info(f"Haciendo solicitud a {url}")
 
         try:
             respuesta = requests.get(url, params=params, headers=self.headers)
@@ -144,7 +161,6 @@ class BlockchainInfoAPI:
         
         # Asegurar que siempre hay una columna 'y'
         if 'y' not in df.columns and len(df.columns) > 0:
-            # Si no hay columna 'y', renombrar la primera columna numérica
             numeric_cols = df.select_dtypes(include=['number']).columns
             if len(numeric_cols) > 0:
                 df = df.rename(columns={numeric_cols[0]: 'y'})
@@ -163,7 +179,9 @@ class BlockchainInfoAPI:
     def obtener_pools(self, **params) -> pd.DataFrame:
         try:
             if 'timespan' not in params:
-                params['timespan'] = '3months'
+                params['timespan'] = '4days'
+            
+            params['cors'] = 'true'
 
             endpoint = "pools"
             datos = self._hacer_solicitud(endpoint, params)
@@ -188,28 +206,51 @@ class BlockchainInfoAPI:
             return pd.DataFrame(columns=['relativeSize'])
 
     def obtener_categorias_graficos(self) -> Dict[str, List[str]]:
+        """Retorna todas las métricas disponibles organizadas por categoría"""
         categorias = {
             'Mercado': [
-                'market-price', 'market-cap', 'trade-volume'
+                'market-price',
+                'market-cap',
+                'trade-volume'
             ],
-            'Red': [
-                'hash-rate', 'difficulty', 'miners-revenue'
-            ],
-            'Bloques': [
-                'blocks-size', 'avg-block-size', 'n-transactions-per-block'
-            ],
-            'Transacciones': [
-                'n-transactions-total', 'n-transactions', 'transaction-fees', 
-                'transaction-fees-usd', 'cost-per-transaction', 
+            'Detalles de Bloques': [
+                'blocks-size',
+                'avg-block-size',
+                'n-transactions-per-block',
+                'n-payments-per-block',
+                'n-transactions-total',
+                'median-confirmation-time',
                 'avg-confirmation-time'
             ],
-            'Mempool': [
-                'mempool-count', 'mempool-size'
+            'Información de Minería': [
+                'hash-rate',
+                'difficulty',
+                'miners-revenue',
+                'transaction-fees',
+                'transaction-fees-usd',
+                'fees-usd-per-transaction',
+                'cost-per-transaction',
+                'cost-per-transaction-percent'
             ],
             'Actividad de Red': [
-                'n-unique-addresses', 'transactions-per-second',
-                'output-volume', 'utxo-count',
-                'estimated-transaction-volume', 'estimated-transaction-volume-usd'
+                'n-unique-addresses',
+                'n-transactions',
+                'n-payments',
+                'transactions-per-second',
+                'output-volume',
+                'mempool-count',
+                'mempool-growth',
+                'mempool-size',
+                'mempool-state-by-fee-level',
+                'utxo-count',
+                'n-transactions-excluding-popular',
+                'estimated-transaction-volume',
+                'estimated-transaction-volume-usd'
+            ],
+            'Señales de Mercado': [
+                'mvrv',
+                'nvt',
+                'nvts'
             ],
             'Suministro': [
                 'total-bitcoins'
@@ -217,6 +258,7 @@ class BlockchainInfoAPI:
         }
         return categorias
 
+    # Métodos de acceso rápido para métricas comunes
     def obtener_precio_mercado(self, **params) -> pd.DataFrame:
         return self.obtener_grafico('market-price', **params)
 
@@ -405,15 +447,22 @@ with st.sidebar:
         "1 año": "1year",
         "2 años": "2years",
         "3 años": "3years",
+        "5 años": "5years",
         "Todo": "all"
     }
     
-    timespan_label = st.selectbox("📅 Período de tiempo", list(timespan_options.keys()), index=4)
+    timespan_label = st.selectbox("📅 Período de tiempo", list(timespan_options.keys()), index=6)
     timespan = timespan_options[timespan_label]
     
     st.markdown("---")
-    st.markdown("""
+    
+    # Mostrar total de métricas disponibles
+    categorias = api.obtener_categorias_graficos()
+    total_metricas = sum(len(graficos) for graficos in categorias.values())
+    
+    st.markdown(f"""
     <div class="info-box">
+    <b>📊 {total_metricas} métricas</b> disponibles<br>
     <b>💡 Tip:</b> Explora diferentes métricas para obtener insights profundos sobre Bitcoin.
     </div>
     """, unsafe_allow_html=True)
@@ -427,7 +476,6 @@ if seccion == "🏠 Inicio":
     with st.spinner("Cargando datos..."):
         try:
             precio_df = api.obtener_precio_mercado(timespan='1days')
-            # Obtener el nombre de la columna de valores
             valor_col = 'y' if 'y' in precio_df.columns else precio_df.columns[0]
             precio_actual = precio_df[valor_col].iloc[-1]
             precio_anterior = precio_df[valor_col].iloc[-2] if len(precio_df) > 1 else precio_actual
@@ -503,11 +551,14 @@ if seccion == "🏠 Inicio":
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("### 🎯 Categorías Disponibles")
-        categorias = api.obtener_categorias_graficos()
+        st.markdown(f"### 🎯 Categorías Disponibles")
         for cat, graficos in categorias.items():
             with st.expander(f"📁 {cat}"):
-                st.write(f"{len(graficos)} métricas disponibles")
+                st.write(f"**{len(graficos)} métricas disponibles**")
+                for g in graficos[:5]:
+                    st.caption(f"• {api.nombres_descriptivos.get(g, g)}")
+                if len(graficos) > 5:
+                    st.caption(f"... y {len(graficos) - 5} más")
 
 # Sección: VISUALIZACIÓN
 elif seccion == "📊 Visualización":
@@ -529,7 +580,7 @@ elif seccion == "📊 Visualización":
         tipo_grafico = st.selectbox("📊 Tipo de gráfico", ["Línea", "Área"])
     
     with col2:
-        st.markdown(f"<div class='metric-card'><h4>{metrica_mostrar}</h4></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><h4>{metrica_mostrar}</h4><code>{metrica_seleccionada}</code></div>", unsafe_allow_html=True)
     
     if st.button("🚀 Cargar Datos", type="primary"):
         with st.spinner("Obteniendo datos..."):
@@ -573,7 +624,6 @@ elif seccion == "📊 Visualización":
                 st.markdown("### 📊 Estadísticas")
                 col1, col2, col3, col4 = st.columns(4)
                 
-                # Obtener la columna de valores
                 valor_col = 'y' if 'y' in df.columns else df.columns[0]
                 
                 with col1:
@@ -590,6 +640,7 @@ elif seccion == "📊 Visualización":
                 
             except Exception as e:
                 st.error(f"Error al cargar datos: {str(e)}")
+                st.info("💡 Algunos endpoints pueden no estar disponibles temporalmente")
 
 # Sección: COMPARACIÓN
 elif seccion == "📈 Comparación":
@@ -604,7 +655,7 @@ elif seccion == "📈 Comparación":
         metricas_seleccionadas = []
         
         for categoria, graficos in categorias.items():
-            with st.expander(f"📁 {categoria}"):
+            with st.expander(f"📁 {categoria} ({len(graficos)})"):
                 for grafico in graficos:
                     nombre_desc = api.nombres_descriptivos.get(grafico, grafico)
                     if st.checkbox(nombre_desc, key=grafico):
@@ -616,8 +667,10 @@ elif seccion == "📈 Comparación":
         
         if metricas_seleccionadas:
             st.success(f"✅ {len(metricas_seleccionadas)} métricas seleccionadas")
-            for m in metricas_seleccionadas:
+            for m in metricas_seleccionadas[:10]:
                 st.write(f"• {api.nombres_descriptivos.get(m, m)}")
+            if len(metricas_seleccionadas) > 10:
+                st.caption(f"... y {len(metricas_seleccionadas) - 10} más")
         else:
             st.info("👆 Selecciona al menos una métrica de las categorías")
     
@@ -627,7 +680,10 @@ elif seccion == "📈 Comparación":
             metricas_exitosas = []
             metricas_fallidas = []
             
-            for metrica in metricas_seleccionadas:
+            progress_bar = st.progress(0)
+            total = len(metricas_seleccionadas)
+            
+            for idx, metrica in enumerate(metricas_seleccionadas):
                 try:
                     df = api.obtener_grafico(metrica, timespan=timespan)
                     
@@ -635,8 +691,6 @@ elif seccion == "📈 Comparación":
                         df = (df / df.iloc[0]) * 100
                     
                     nombre_desc = api.nombres_descriptivos.get(metrica, metrica)
-                    
-                    # Obtener la columna de valores
                     valor_col = 'y' if 'y' in df.columns else df.columns[0]
                     
                     fig.add_trace(go.Scatter(
@@ -650,9 +704,13 @@ elif seccion == "📈 Comparación":
                     metricas_exitosas.append(nombre_desc)
                     
                 except Exception as e:
-                    metricas_fallidas.append(f"{api.nombres_descriptivos.get(metrica, metrica)} ({str(e)[:50]})")
+                    metricas_fallidas.append(f"{api.nombres_descriptivos.get(metrica, metrica)}")
                     logger.error(f"Error al obtener {metrica}: {str(e)}")
                     continue
+                finally:
+                    progress_bar.progress((idx + 1) / total)
+            
+            progress_bar.empty()
             
             if metricas_exitosas:
                 fig.update_layout(
@@ -677,7 +735,6 @@ elif seccion == "📈 Comparación":
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Mostrar resumen de resultados
                 col1, col2 = st.columns(2)
                 with col1:
                     if metricas_exitosas:
@@ -693,7 +750,7 @@ elif seccion == "📈 Comparación":
                             for m in metricas_fallidas:
                                 st.write(f"• {m}")
             else:
-                st.error("❌ No se pudo obtener ninguna de las métricas seleccionadas. Es posible que los endpoints no estén disponibles.")
+                st.error("❌ No se pudo obtener ninguna de las métricas seleccionadas")
 
 # Sección: EXPLORADOR
 elif seccion == "🔍 Explorador":
@@ -712,7 +769,7 @@ elif seccion == "🔍 Explorador":
                     col1, col2 = st.columns([3, 1])
                     with col1:
                         st.write(f"**{api.nombres_descriptivos.get(grafico, grafico)}**")
-                        st.caption(f"ID técnico: `{grafico}`")
+                        st.caption(f"ID: `{grafico}`")
                     with col2:
                         if st.button("Ver", key=f"ver_{grafico}"):
                             with st.spinner("Cargando..."):
@@ -732,12 +789,12 @@ elif seccion == "🔍 Explorador":
         periodos_pools = {
             "24 horas": "24hours",
             "48 horas": "48hours",
+            "4 días": "4days",
             "1 semana": "1weeks",
-            "1 mes": "1months",
-            "3 meses": "3months"
+            "1 mes": "1months"
         }
         
-        periodo = st.selectbox("Selecciona período", list(periodos_pools.keys()))
+        periodo = st.selectbox("Selecciona período", list(periodos_pools.keys()), index=2)
         
         if st.button("🔍 Cargar Pools", type="primary"):
             with st.spinner("Obteniendo datos de pools..."):
@@ -848,9 +905,13 @@ elif seccion == "📥 Exportar Datos":
                         
                         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                             for metrica in metricas_export:
-                                df = api.obtener_grafico(metrica, timespan=timespan)
-                                nombre_hoja = api.nombres_descriptivos.get(metrica, metrica)[:31]
-                                df.to_excel(writer, sheet_name=nombre_hoja)
+                                try:
+                                    df = api.obtener_grafico(metrica, timespan=timespan)
+                                    nombre_hoja = api.nombres_descriptivos.get(metrica, metrica)[:31]
+                                    df.to_excel(writer, sheet_name=nombre_hoja)
+                                except Exception as e:
+                                    logger.error(f"Error exportando {metrica}: {str(e)}")
+                                    continue
                         
                         st.download_button(
                             label="⬇️ Descargar Excel Completo",
