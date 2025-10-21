@@ -596,10 +596,10 @@ elif seccion == "📈 Comparación":
     
     st.markdown("---")
     
-    # Siempre usar el session state para las métricas
-    metricas_seleccionadas = st.session_state.metricas_comparacion
-    
-    if st.button("🔄 Generar Comparación", type="primary", disabled=len(metricas_seleccionadas) == 0, use_container_width=True):
+    # Usar directamente el session state para el botón
+    if st.button("🔄 Generar Comparación", type="primary", disabled=len(st.session_state.metricas_comparacion) == 0, use_container_width=True):
+        # Ahora sí asignamos a una variable local para usar en el bucle
+        metricas_seleccionadas = st.session_state.metricas_comparacion
         with st.spinner("Generando comparación..."):
             fig = go.Figure()
             metricas_exitosas = []
