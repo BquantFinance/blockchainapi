@@ -522,6 +522,10 @@ elif seccion == "📊 Visualización":
 elif seccion == "📈 Comparación":
     st.markdown("### 📈 Comparación de Múltiples Métricas")
     
+    # Inicializar session state para métricas seleccionadas
+    if 'metricas_comparacion' not in st.session_state:
+        st.session_state.metricas_comparacion = []
+    
     # Sugerencias de combinaciones
     combinaciones_sugeridas = {
         "💰 Precio y Mercado": ['market-price', 'market-cap', 'trade-volume'],
@@ -538,11 +542,10 @@ elif seccion == "📈 Comparación":
     st.info("💡 Selecciona una combinación predefinida haciendo clic en el botón correspondiente")
     
     cols = st.columns(4)
-    combo_seleccionada = None
     for idx, (nombre, metricas) in enumerate(combinaciones_sugeridas.items()):
         with cols[idx % 4]:
             if st.button(nombre, key=f"combo_{idx}", use_container_width=True):
-                combo_seleccionada = metricas
+                st.session_state.metricas_comparacion = metricas
     
     st.markdown("---")
     
@@ -552,22 +555,33 @@ elif seccion == "📈 Comparación":
     
     with col1:
         st.markdown("#### 📋 Selección Manual de Métricas")
-        metricas_seleccionadas = []
         
-        # Si se seleccionó una combinación, mostrar info
-        if combo_seleccionada:
-            st.success(f"✅ Combinación cargada: {len(combo_seleccionada)} métricas")
-            metricas_seleccionadas = combo_seleccionada
-            for m in combo_seleccionada:
+        # Botón para limpiar selección
+        if st.button("🗑️ Limpiar Selección"):
+            st.session_state.metricas_comparacion = []
+        
+        # Si hay métricas en session state, mostrarlas
+        if st.session_state.metricas_comparacion:
+            st.success(f"✅ {len(st.session_state.metricas_comparacion)} métricas seleccionadas")
+            for m in st.session_state.metricas_comparacion:
                 st.write(f"• {api.nombres_descriptivos.get(m, m)}")
-        else:
-            # Selección manual
-            for categoria, graficos in categorias.items():
-                with st.expander(f"📁 {categoria} ({len(graficos)})"):
-                    for grafico in graficos:
-                        nombre_desc = api.nombres_descriptivos.get(grafico, grafico)
-                        if st.checkbox(nombre_desc, key=f"check_{grafico}"):
-                            metricas_seleccionadas.append(grafico)
+        
+        # Selección manual con checkboxes
+        for categoria, graficos in categorias.items():
+            with st.expander(f"📁 {categoria} ({len(graficos)})"):
+                for grafico in graficos:
+                    nombre_desc = api.nombres_descriptivos.get(grafico, grafico)
+                    # Verificar si está en session state
+                    is_checked = grafico in st.session_state.metricas_comparacion
+                    
+                    if st.checkbox(nombre_desc, value=is_checked, key=f"check_{grafico}"):
+                        if grafico not in st.session_state.metricas_comparacion:
+                            st.session_state.metricas_comparacion.append(grafico)
+                    else:
+                        if grafico in st.session_state.metricas_comparacion:
+                            st.session_state.metricas_comparacion.remove(grafico)
+        
+        metricas_seleccionadas = st.session_state.metricas_comparacion
     
     with col2:
         st.markdown("#### ⚙️ Opciones de Comparación")
