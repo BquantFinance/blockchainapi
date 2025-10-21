@@ -535,13 +535,14 @@ elif seccion == "📈 Comparación":
     }
     
     st.markdown("#### 🎯 Combinaciones Sugeridas")
+    st.info("💡 Selecciona una combinación predefinida haciendo clic en el botón correspondiente")
     
     cols = st.columns(4)
+    combo_seleccionada = None
     for idx, (nombre, metricas) in enumerate(combinaciones_sugeridas.items()):
         with cols[idx % 4]:
             if st.button(nombre, key=f"combo_{idx}", use_container_width=True):
-                st.session_state['metricas_seleccionadas'] = metricas
-                st.rerun()
+                combo_seleccionada = metricas
     
     st.markdown("---")
     
@@ -550,40 +551,40 @@ elif seccion == "📈 Comparación":
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.markdown("#### 📋 Selección Manual")
-        
-        if 'metricas_seleccionadas' not in st.session_state:
-            st.session_state['metricas_seleccionadas'] = []
-        
+        st.markdown("#### 📋 Selección Manual de Métricas")
         metricas_seleccionadas = []
         
-        for categoria, graficos in categorias.items():
-            with st.expander(f"📁 {categoria} ({len(graficos)})"):
-                for grafico in graficos:
-                    nombre_desc = api.nombres_descriptivos.get(grafico, grafico)
-                    default_checked = grafico in st.session_state.get('metricas_seleccionadas', [])
-                    if st.checkbox(nombre_desc, key=grafico, value=default_checked):
-                        metricas_seleccionadas.append(grafico)
+        # Si se seleccionó una combinación, mostrar info
+        if combo_seleccionada:
+            st.success(f"✅ Combinación cargada: {len(combo_seleccionada)} métricas")
+            metricas_seleccionadas = combo_seleccionada
+            for m in combo_seleccionada:
+                st.write(f"• {api.nombres_descriptivos.get(m, m)}")
+        else:
+            # Selección manual
+            for categoria, graficos in categorias.items():
+                with st.expander(f"📁 {categoria} ({len(graficos)})"):
+                    for grafico in graficos:
+                        nombre_desc = api.nombres_descriptivos.get(grafico, grafico)
+                        if st.checkbox(nombre_desc, key=f"check_{grafico}"):
+                            metricas_seleccionadas.append(grafico)
     
     with col2:
         st.markdown("#### ⚙️ Opciones de Comparación")
         
-        tipo_grafico = st.selectbox("📊 Tipo de gráfico", ["Línea", "Área"], key="tipo_comparacion")
+        tipo_grafico = st.radio("📊 Tipo de gráfico", ["Línea", "Área"], horizontal=True)
         normalizar = st.checkbox("📊 Normalizar datos (100 = valor inicial)", value=False)
         
+        st.markdown("---")
+        
         if metricas_seleccionadas:
-            st.success(f"✅ {len(metricas_seleccionadas)} métricas seleccionadas")
-            with st.expander("Ver métricas seleccionadas"):
-                for m in metricas_seleccionadas:
-                    st.write(f"• {api.nombres_descriptivos.get(m, m)}")
+            st.success(f"✅ {len(metricas_seleccionadas)} métricas listas para comparar")
         else:
             st.info("👆 Selecciona métricas manualmente o usa una combinación sugerida")
-        
-        if st.button("🗑️ Limpiar Selección", use_container_width=True):
-            st.session_state['metricas_seleccionadas'] = []
-            st.rerun()
     
-    if st.button("🔄 Comparar Métricas", type="primary", disabled=len(metricas_seleccionadas) == 0):
+    st.markdown("---")
+    
+    if st.button("🔄 Generar Comparación", type="primary", disabled=len(metricas_seleccionadas) == 0, use_container_width=True):
         with st.spinner("Generando comparación..."):
             fig = go.Figure()
             metricas_exitosas = []
@@ -620,14 +621,14 @@ elif seccion == "📈 Comparación":
                             fill='tonexty',
                             name=nombre_desc,
                             mode='lines',
-                            line=dict(width=1),
-                            stackgroup='one' if not normalizar else None
+                            line=dict(width=1)
                         ))
                     
                     metricas_exitosas.append(nombre_desc)
                     
                 except Exception as e:
                     metricas_fallidas.append(api.nombres_descriptivos.get(metrica, metrica))
+                    logger.error(f"Error en comparación con {metrica}: {str(e)}")
                 finally:
                     progress_bar.progress((idx + 1) / len(metricas_seleccionadas))
             
@@ -644,7 +645,11 @@ elif seccion == "📈 Comparación":
                     paper_bgcolor='rgba(0,0,0,0)',
                     font=dict(color='#a8b2d1'),
                     height=600,
-                    legend=dict(bgcolor='rgba(0,0,0,0.5)', bordercolor='rgba(255,255,255,0.2)', borderwidth=1)
+                    legend=dict(
+                        bgcolor='rgba(0,0,0,0.5)',
+                        bordercolor='rgba(255,255,255,0.2)',
+                        borderwidth=1
+                    )
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
@@ -652,19 +657,20 @@ elif seccion == "📈 Comparación":
                 col1, col2 = st.columns(2)
                 with col1:
                     if metricas_exitosas:
-                        st.success(f"✅ {len(metricas_exitosas)} métricas graficadas")
-                        with st.expander("Ver métricas exitosas"):
+                        st.success(f"✅ {len(metricas_exitosas)} métricas graficadas correctamente")
+                        with st.expander("📊 Ver métricas graficadas"):
                             for m in metricas_exitosas:
                                 st.write(f"• {m}")
                 
                 with col2:
                     if metricas_fallidas:
-                        st.warning(f"⚠️ {len(metricas_fallidas)} métricas no disponibles")
-                        with st.expander("Ver métricas con error"):
+                        st.warning(f"⚠️ {len(metricas_fallidas)} métricas fallaron")
+                        with st.expander("❌ Ver métricas con error"):
                             for m in metricas_fallidas:
                                 st.write(f"• {m}")
             else:
-                st.error("❌ No se pudo obtener ninguna métrica")
+                st.error("❌ No se pudo obtener ninguna de las métricas seleccionadas")
+                st.info("💡 Intenta con otras métricas o un período de tiempo diferente")
 
 elif seccion == "🔍 Explorador":
     st.markdown("### 🔍 Explorador Avanzado de Datos")
