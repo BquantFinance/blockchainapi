@@ -141,6 +141,13 @@ class BlockchainInfoAPI:
         if 'x' in df.columns:
             df = df.set_index('x')
             df.index = pd.to_datetime(df.index, unit='s')
+        
+        # Asegurar que siempre hay una columna 'y'
+        if 'y' not in df.columns and len(df.columns) > 0:
+            # Si no hay columna 'y', renombrar la primera columna numérica
+            numeric_cols = df.select_dtypes(include=['number']).columns
+            if len(numeric_cols) > 0:
+                df = df.rename(columns={numeric_cols[0]: 'y'})
 
         return df
 
@@ -189,24 +196,20 @@ class BlockchainInfoAPI:
                 'hash-rate', 'difficulty', 'miners-revenue'
             ],
             'Bloques': [
-                'blocks-size', 'avg-block-size', 'n-transactions-per-block', 'n-payments-per-block'
+                'blocks-size', 'avg-block-size', 'n-transactions-per-block'
             ],
             'Transacciones': [
-                'n-transactions-total', 'transaction-fees', 'transaction-fees-usd',
-                'fees-usd-per-transaction', 'cost-per-transaction', 'cost-per-transaction-percent',
+                'n-transactions-total', 'n-transactions', 'transaction-fees', 
+                'transaction-fees-usd', 'cost-per-transaction', 
                 'avg-confirmation-time'
             ],
-            'Valoración': [
-                'nvt', 'nvts', 'mvrv'
-            ],
             'Mempool': [
-                'mempool-count', 'mempool-growth', 'mempool-size', 'mempool-state-by-fee-level'
+                'mempool-count', 'mempool-size'
             ],
             'Actividad de Red': [
-                'n-unique-addresses', 'n-transactions', 'transactions-per-second',
-                'n-payments', 'output-volume', 'utxo-count',
-                'n-transactions-excluding-popular', 'estimated-transaction-volume',
-                'estimated-transaction-volume-usd'
+                'n-unique-addresses', 'transactions-per-second',
+                'output-volume', 'utxo-count',
+                'estimated-transaction-volume', 'estimated-transaction-volume-usd'
             ],
             'Suministro': [
                 'total-bitcoins'
@@ -424,8 +427,10 @@ if seccion == "🏠 Inicio":
     with st.spinner("Cargando datos..."):
         try:
             precio_df = api.obtener_precio_mercado(timespan='1days')
-            precio_actual = precio_df['y'].iloc[-1]
-            precio_anterior = precio_df['y'].iloc[-2] if len(precio_df) > 1 else precio_actual
+            # Obtener el nombre de la columna de valores
+            valor_col = 'y' if 'y' in precio_df.columns else precio_df.columns[0]
+            precio_actual = precio_df[valor_col].iloc[-1]
+            precio_anterior = precio_df[valor_col].iloc[-2] if len(precio_df) > 1 else precio_actual
             delta_precio = ((precio_actual - precio_anterior) / precio_anterior) * 100
             
             with col1:
@@ -436,7 +441,8 @@ if seccion == "🏠 Inicio":
                 )
             
             cap_df = api.obtener_cap_mercado(timespan='1days')
-            cap_actual = cap_df['y'].iloc[-1]
+            valor_col = 'y' if 'y' in cap_df.columns else cap_df.columns[0]
+            cap_actual = cap_df[valor_col].iloc[-1]
             
             with col2:
                 st.metric(
@@ -445,7 +451,8 @@ if seccion == "🏠 Inicio":
                 )
             
             volumen_df = api.obtener_volumen_comercio(timespan='1days')
-            volumen_actual = volumen_df['y'].iloc[-1]
+            valor_col = 'y' if 'y' in volumen_df.columns else volumen_df.columns[0]
+            volumen_actual = volumen_df[valor_col].iloc[-1]
             
             with col3:
                 st.metric(
@@ -454,7 +461,8 @@ if seccion == "🏠 Inicio":
                 )
             
             tx_df = api.obtener_transacciones(timespan='1days')
-            tx_actual = tx_df['y'].iloc[-1]
+            valor_col = 'y' if 'y' in tx_df.columns else tx_df.columns[0]
+            tx_actual = tx_df[valor_col].iloc[-1]
             
             with col4:
                 st.metric(
@@ -565,14 +573,17 @@ elif seccion == "📊 Visualización":
                 st.markdown("### 📊 Estadísticas")
                 col1, col2, col3, col4 = st.columns(4)
                 
+                # Obtener la columna de valores
+                valor_col = 'y' if 'y' in df.columns else df.columns[0]
+                
                 with col1:
-                    st.metric("Máximo", f"{df['y'].max():,.2f}")
+                    st.metric("Máximo", f"{df[valor_col].max():,.2f}")
                 with col2:
-                    st.metric("Mínimo", f"{df['y'].min():,.2f}")
+                    st.metric("Mínimo", f"{df[valor_col].min():,.2f}")
                 with col3:
-                    st.metric("Promedio", f"{df['y'].mean():,.2f}")
+                    st.metric("Promedio", f"{df[valor_col].mean():,.2f}")
                 with col4:
-                    st.metric("Último Valor", f"{df['y'].iloc[-1]:,.2f}")
+                    st.metric("Último Valor", f"{df[valor_col].iloc[-1]:,.2f}")
                 
                 with st.expander("📋 Ver datos en tabla"):
                     st.dataframe(df.tail(50), use_container_width=True)
@@ -612,10 +623,12 @@ elif seccion == "📈 Comparación":
     
     if st.button("🔄 Comparar Métricas", type="primary", disabled=len(metricas_seleccionadas) == 0):
         with st.spinner("Generando comparación..."):
-            try:
-                fig = go.Figure()
-                
-                for metrica in metricas_seleccionadas:
+            fig = go.Figure()
+            metricas_exitosas = []
+            metricas_fallidas = []
+            
+            for metrica in metricas_seleccionadas:
+                try:
                     df = api.obtener_grafico(metrica, timespan=timespan)
                     
                     if normalizar and len(df) > 0:
@@ -623,14 +636,25 @@ elif seccion == "📈 Comparación":
                     
                     nombre_desc = api.nombres_descriptivos.get(metrica, metrica)
                     
+                    # Obtener la columna de valores
+                    valor_col = 'y' if 'y' in df.columns else df.columns[0]
+                    
                     fig.add_trace(go.Scatter(
                         x=df.index,
-                        y=df['y'],
+                        y=df[valor_col],
                         mode='lines',
                         name=nombre_desc,
                         line=dict(width=2)
                     ))
-                
+                    
+                    metricas_exitosas.append(nombre_desc)
+                    
+                except Exception as e:
+                    metricas_fallidas.append(f"{api.nombres_descriptivos.get(metrica, metrica)} ({str(e)[:50]})")
+                    logger.error(f"Error al obtener {metrica}: {str(e)}")
+                    continue
+            
+            if metricas_exitosas:
                 fig.update_layout(
                     title=dict(
                         text="Comparación de Métricas de Bitcoin",
@@ -653,8 +677,23 @@ elif seccion == "📈 Comparación":
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
-            except Exception as e:
-                st.error(f"Error al comparar métricas: {str(e)}")
+                # Mostrar resumen de resultados
+                col1, col2 = st.columns(2)
+                with col1:
+                    if metricas_exitosas:
+                        st.success(f"✅ {len(metricas_exitosas)} métricas graficadas correctamente")
+                        with st.expander("Ver métricas exitosas"):
+                            for m in metricas_exitosas:
+                                st.write(f"• {m}")
+                
+                with col2:
+                    if metricas_fallidas:
+                        st.warning(f"⚠️ {len(metricas_fallidas)} métricas no disponibles")
+                        with st.expander("Ver métricas con error"):
+                            for m in metricas_fallidas:
+                                st.write(f"• {m}")
+            else:
+                st.error("❌ No se pudo obtener ninguna de las métricas seleccionadas. Es posible que los endpoints no estén disponibles.")
 
 # Sección: EXPLORADOR
 elif seccion == "🔍 Explorador":
